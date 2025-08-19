@@ -33,7 +33,10 @@ type Aggregator struct {
 }
 
 func NewAggregator(cacheTTL time.Duration) *Aggregator {
-	return &Aggregator{checks: make(map[Kind][]Check), cacheTTL: cacheTTL}
+	return &Aggregator{
+		checks:   make(map[Kind][]Check),
+		cacheTTL: cacheTTL,
+	}
 }
 
 func (a *Aggregator) Register(c Check) {
@@ -102,9 +105,8 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 
 	if err != nil {
 		a.cacheErr[kind].Store(err)
-	} else {
-		a.cacheErr[kind].Store(nil)
 	}
+
 	atomic.StoreInt64(&a.cacheAt[kind], now.UnixNano())
 
 	return err
