@@ -14,6 +14,7 @@ type Kind int
 const (
 	Liveness Kind = iota
 	Readiness
+	Startup
 )
 
 type Check struct {
@@ -28,8 +29,8 @@ type Aggregator struct {
 	checks map[Kind][]Check
 
 	cacheTTL time.Duration
-	cacheAt  [2]int64
-	cacheErr [2]atomic.Value
+	cacheAt  [3]int64
+	cacheErr [3]atomic.Value
 }
 
 func NewAggregator(cacheTTL time.Duration) *Aggregator {
