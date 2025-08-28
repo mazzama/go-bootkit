@@ -1,4 +1,4 @@
-package gobootkit
+package core
 
 import "context"
 
