@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -114,4 +115,35 @@ func (r *RedisCache) Delete(ctx context.Context, key string) error {
 func (r *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
 	result, err := r.Client().Exists(ctx, key).Result()
 	return result > 0, err
+}
+
+func (r *RedisCache) HealthChecks() []healthkit.Check {
+	return []healthkit.Check{
+		{
+			Name:    r.name + "-liveness",
+			Kind:    healthkit.Liveness,
+			Timeout: 2 * time.Second,
+			Fn: func(ctx context.Context) error {
+				return r.client.Ping(ctx).Err()
+			},
+		},
+		{
+			Name:    r.name + "-readiness",
+			Kind:    healthkit.Readiness,
+			Timeout: 2 * time.Second,
+			Fn: func(ctx context.Context) error {
+				if r.client == nil {
+					return fmt.Errorf("redis client is not initialized")
+				}
+				select {
+				case <-r.Ready():
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					return fmt.Errorf("redis is not ready")
+				}
+			},
+		},
+	}
 }
