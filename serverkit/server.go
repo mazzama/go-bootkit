@@ -16,14 +16,15 @@ import (
 )
 
 type WebServer struct {
-	name       string
-	addr       string
-	server     *http.Server
-	router     *chi.Mux
-	health     *healthkit.Aggregator
-	logger     *slog.Logger
-	readyCh    chan struct{}
-	shutdownCh chan struct{}
+	name              string
+	addr              string
+	server            *http.Server
+	router            *chi.Mux
+	health            *healthkit.Aggregator
+	logger            *slog.Logger
+	readyCh           chan struct{}
+	shutdownCh        chan struct{}
+	customMiddlewares []func(http.Handler) http.Handler
 }
 
 type WebServerOption func(*WebServer)
@@ -56,6 +57,12 @@ func NewWebServer(name, addr string, options ...WebServerOption) *WebServer {
 func WithWebServerLogger(logger *slog.Logger) WebServerOption {
 	return func(ws *WebServer) {
 		ws.logger = logger
+	}
+}
+
+func WithCustomMiddleware(middlewares ...func(http.Handler) http.Handler) WebServerOption {
+	return func(ws *WebServer) {
+		ws.customMiddlewares = append(ws.customMiddlewares, middlewares...)
 	}
 }
 
@@ -150,6 +157,10 @@ func (ws *WebServer) setupMiddleware() {
 	ws.router.Use(middleware.RealIP)
 	ws.router.Use(middleware.Recoverer)
 	ws.router.Use(middleware.Timeout(60 * time.Second))
+
+	for _, mw := range ws.customMiddlewares {
+		ws.router.Use(mw)
+	}
 }
 
 func (ws *WebServer) setupHealthEndpoints() {
