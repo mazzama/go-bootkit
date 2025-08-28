@@ -4,7 +4,7 @@ go 1.24.6
 
 require (
 	github.com/jackc/pgx/v5 v5.7.5
-	github.com/mazzama/go-bootkit/core v0.1.2
+	github.com/mazzama/go-bootkit/core v0.1.3
 )
 
 require (
