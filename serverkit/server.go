@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/go-chi/httplog/v3"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/go-chi/httplog/v3"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/mazzama/go-bootkit/healthkit"
+	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
 type WebServer struct {
