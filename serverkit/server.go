@@ -159,20 +159,19 @@ func (ws *WebServer) setupHealthEndpoints() {
 		Fn: func(ctx context.Context) error {
 			return nil
 		},
-	})
-
-	ws.health.Register(healthkit.Check{
-		Name: "server",
-		Kind: healthkit.Readiness,
-		Fn: func(ctx context.Context) error {
-			select {
-			case <-ws.readyCh:
-				return nil
-			default:
-				return fmt.Errorf("server not ready")
-			}
-		},
-	})
+	},
+		healthkit.Check{
+			Name: "server",
+			Kind: healthkit.Readiness,
+			Fn: func(ctx context.Context) error {
+				select {
+				case <-ws.readyCh:
+					return nil
+				default:
+					return fmt.Errorf("server not ready")
+				}
+			},
+		})
 
 	ws.router.Get("/health/liveness", ws.health.Handler(healthkit.Liveness))
 	ws.router.Get("/health/readiness", ws.health.Handler(healthkit.Readiness))

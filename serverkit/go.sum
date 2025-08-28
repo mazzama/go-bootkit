@@ -2,5 +2,5 @@ github.com/go-chi/chi/v5 v5.2.3 h1:WQIt9uxdsAbgIYgid+BpYc+liqQZGMHRaUwp0JUcvdE=
 github.com/go-chi/chi/v5 v5.2.3/go.mod h1:L2yAIGWB3H+phAw1NxKwWM+7eUH/lU8pOMm5hHcoops=
 github.com/go-chi/httplog/v3 v3.2.2 h1:G0oYv3YYcikNjijArHFUlqfR78cQNh9fGT43i6StqVc=
 github.com/go-chi/httplog/v3 v3.2.2/go.mod h1:N/J1l5l1fozUrqIVuT8Z/HzNeSy8TF2EFyokPLe6y2w=
-github.com/mazzama/go-bootkit/core v0.1.2 h1:jKW1GH6lExpd2hvWaKAlf2U+rbaYxi6/Lkyy9iFNjqE=
-github.com/mazzama/go-bootkit/core v0.1.2/go.mod h1:4W2+ukShx+AxyHHN5J++eLAG2OAIT3a2cAguD3JIXn4=
+github.com/mazzama/go-bootkit/core v0.1.3 h1:H7DHbKKc1yAgxgzjaTGQoeNeVBFWg/EFy7zNx32YhmM=
+github.com/mazzama/go-bootkit/core v0.1.3/go.mod h1:4W2+ukShx+AxyHHN5J++eLAG2OAIT3a2cAguD3JIXn4=
