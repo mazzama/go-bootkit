@@ -20,7 +20,7 @@ type RedisCache struct {
 
 type RedisOption func(*RedisCache)
 
-func NewRedisCache(options ...RedisOption) *RedisCache {
+func NewRedisCache(ctx context.Context, options ...RedisOption) (*RedisCache, error) {
 	cache := &RedisCache{
 		name:      "redis-cache",
 		readyChan: make(chan struct{}),
@@ -35,7 +35,13 @@ func NewRedisCache(options ...RedisOption) *RedisCache {
 		option(cache)
 	}
 
-	return cache
+	cache.client = redis.NewClient(cache.options)
+
+	if err := cache.client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	return cache, nil
 }
 
 func WithName(name string) RedisOption {
@@ -67,16 +73,8 @@ func (r *RedisCache) Name() string {
 }
 
 func (r *RedisCache) Start(ctx context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.client = redis.NewClient(r.options)
-
-	if err := r.client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("failed to connect to Redis: %w", err)
-	}
-
 	close(r.readyChan)
+	<-ctx.Done()
 	return nil
 }
 
