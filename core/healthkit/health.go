@@ -40,13 +40,16 @@ func NewAggregator(cacheTTL time.Duration) *Aggregator {
 	}
 }
 
-func (a *Aggregator) Register(c Check) {
-	if c.Timeout <= 0 {
-		c.Timeout = 300 * time.Millisecond
-	}
+func (a *Aggregator) Register(checks ...Check) {
 	a.mu.Lock()
-	a.checks[c.Kind] = append(a.checks[c.Kind], c)
-	a.mu.Unlock()
+	defer a.mu.Unlock()
+
+	for _, c := range checks {
+		if c.Timeout <= 0 {
+			c.Timeout = 300 * time.Millisecond
+		}
+		a.checks[c.Kind] = append(a.checks[c.Kind], c)
+	}
 }
 
 func (a *Aggregator) Handler(kind Kind) http.HandlerFunc {
