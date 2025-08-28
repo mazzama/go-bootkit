@@ -176,5 +176,6 @@ func (ws *WebServer) setupHealthEndpoints() {
 
 	ws.router.Get("/health/liveness", ws.health.Handler(healthkit.Liveness))
 	ws.router.Get("/health/readiness", ws.health.Handler(healthkit.Readiness))
+	ws.router.Get("/health/startup", ws.health.Handler(healthkit.Startup))
 	ws.router.Get("/health", ws.health.Handler(healthkit.Liveness))
 }
