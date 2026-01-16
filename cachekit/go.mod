@@ -4,7 +4,7 @@ go 1.24.6
 
 require (
 	github.com/mazzama/go-bootkit/core v0.1.3
-	github.com/redis/go-redis/v9 v9.12.1
+	github.com/redis/go-redis/v9 v9.17.2
 )
 
 require (

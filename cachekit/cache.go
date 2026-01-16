@@ -68,6 +68,12 @@ func WithDB(db int) RedisOption {
 	}
 }
 
+func WithUsername(username string) RedisOption {
+	return func(r *RedisCache) {
+		r.options.Username = username
+	}
+}
+
 func (r *RedisCache) Name() string {
 	return r.name
 }
