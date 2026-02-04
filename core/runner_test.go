@@ -2,7 +2,10 @@ package core
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,66 +81,110 @@ func TestWithServices(t *testing.T) {
 	}
 }
 
-func TestApplicationRunner_Run_StartsServices(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+func TestApplicationRunner_Run_Success(t *testing.T) {
+	comp := &TestMockComponent{name: "test-service", readyCh: make(chan struct{})}
+
+	runner := NewApplicationRunner(
+		WithServices(comp),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	comp1 := &TestMockComponent{
-		name:    "svc1",
-		readyCh: make(chan struct{}),
+	err := runner.Run(ctx)
+	// Error may be nil or context.DeadlineExceeded (possibly wrapped)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Run() = %v, want context.DeadlineExceeded or nil", err)
 	}
-	comp2 := &TestMockComponent{
-		name:    "svc2",
-		readyCh: make(chan struct{}),
+}
+
+func TestApplicationRunner_Run_ComponentError(t *testing.T) {
+	comp := &TestMockComponent{
+		name:       "failing-service",
+		startError: fmt.Errorf("start failed"),
+		readyCh:    make(chan struct{}),
 	}
 
-	go func() {
-		runner := NewApplicationRunner(WithServices(comp1, comp2))
-		_ = runner.Run(ctx)
-	}()
+	runner := NewApplicationRunner(WithServices(comp))
 
-	// Wait a bit for services to start
-	time.Sleep(50 * time.Millisecond)
+	ctx := context.Background()
+	err := runner.Run(ctx)
+
+	if err == nil {
+		t.Error("Run() = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "failing-service") {
+		t.Errorf("error should contain component name, got %v", err)
+	}
 }
 
 func TestApplicationRunner_GracefulShutdown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	comp := &TestMockComponent{
-		name:    "test-svc",
-		readyCh: make(chan struct{}),
-	}
-
-	go func() {
-		runner := NewApplicationRunner(
-			WithServices(comp),
-			WithShutdownTimeout(100*time.Millisecond),
-		)
-		_ = runner.Run(ctx)
-	}()
-
-	// Let service start
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	// Wait for graceful shutdown
-	time.Sleep(200 * time.Millisecond)
-}
-
-func TestApplicationRunner_StartDeadline(t *testing.T) {
-	ctx := context.Background()
-
-	slowComp := &NeverReadyComponent{
-		name: "slow-svc",
+	stopCalled := false
+	comp := &StopTrackingComponent{
+		TestMockComponent: TestMockComponent{
+			name:    "shutdown-test",
+			readyCh: make(chan struct{}),
+		},
+	 onStopCalled: func() {
+			stopCalled = true
+		},
 	}
 
 	runner := NewApplicationRunner(
-		WithServices(slowComp),
+		WithServices(comp),
+		WithShutdownTimeout(1*time.Second),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Run in goroutine
+	errCh := make(chan error, 1)
+	go func() { errCh <- runner.Run(ctx) }()
+
+	// Wait for start, then cancel
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	err := <-errCh
+	// Run returns nil when context is canceled (implementation filters out context.Canceled)
+	if err != nil {
+		t.Errorf("Run() = %v, want nil", err)
+	}
+	if !stopCalled {
+		t.Error("Stop() was not called on component")
+	}
+}
+
+// StopTrackingComponent wraps TestMockComponent to track Stop calls
+type StopTrackingComponent struct {
+	TestMockComponent
+	onStopCalled func()
+}
+
+func (s *StopTrackingComponent) Stop(ctx context.Context) error {
+	if s.onStopCalled != nil {
+		s.onStopCalled()
+	}
+	return s.TestMockComponent.Stop(ctx)
+}
+
+func TestApplicationRunner_StartDeadline(t *testing.T) {
+	comp := &NeverReadyComponent{
+		name: "slow-service",
+	}
+
+	runner := NewApplicationRunner(
+		WithServices(comp),
 		WithStartDeadline(50*time.Millisecond),
 	)
 
+	ctx := context.Background()
 	err := runner.Run(ctx)
+
 	if err == nil {
-		t.Error("Run() should return error when start deadline exceeded")
+		t.Error("Run() should fail with start deadline exceeded")
+	}
+	if !strings.Contains(err.Error(), "start deadline exceeded") {
+		t.Errorf("error should mention deadline, got %v", err)
 	}
 }
