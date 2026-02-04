@@ -157,3 +157,24 @@ func TestAggregator_evaluate_Failure(t *testing.T) {
 		}
 	}
 }
+
+func TestAggregator_evaluate_Timeout(t *testing.T) {
+	a := NewAggregator(0)
+	a.Register(
+		Check{
+			Name:    "slow-check",
+			Kind:    Liveness,
+			Timeout: 10 * time.Millisecond,
+			Fn: func(ctx context.Context) error {
+				time.Sleep(100 * time.Millisecond)
+				return nil
+			},
+		},
+	)
+
+	ctx := context.Background()
+	err := a.evaluate(ctx, Liveness)
+	if err == nil {
+		t.Error("evaluate() should timeout and return error")
+	}
+}
