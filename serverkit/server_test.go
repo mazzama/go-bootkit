@@ -2,6 +2,7 @@ package serverkit
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -172,4 +173,46 @@ func TestWebServer_Stop(t *testing.T) {
 	}
 
 	cancel()
+}
+
+// Task 19: Test ServerKit - Health Endpoints
+
+func TestWebServer_HealthEndpoints(t *testing.T) {
+	server := NewWebServer("test", ":8084", WithHealthAggregator(healthkit.NewAggregator(0)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = server.Start(ctx) }()
+	time.Sleep(100 * time.Millisecond)
+
+	tests := []struct {
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{"/health/liveness", http.StatusOK, "ok"},
+		{"/health/readiness", http.StatusOK, "ok"},
+		{"/health/startup", http.StatusOK, "ok"},
+		{"/health", http.StatusOK, "ok"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			resp, err := http.Get("http://localhost:8084" + tt.path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", tt.path, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("%s status = %d, want %d", tt.path, resp.StatusCode, tt.wantStatus)
+			}
+
+			body, _ := io.ReadAll(resp.Body)
+			if string(body) != tt.wantBody {
+				t.Errorf("%s body = %q, want %q", tt.path, string(body), tt.wantBody)
+			}
+		})
+	}
 }
