@@ -39,3 +39,17 @@ func TestNewApplicationRunner_Defaults(t *testing.T) {
 		t.Error("default logger should be nil")
 	}
 }
+
+func TestWithServices(t *testing.T) {
+	comp1 := &TestMockComponent{name: "service1", readyCh: make(chan struct{})}
+	comp2 := &TestMockComponent{name: "service2", readyCh: make(chan struct{})}
+
+	runner := NewApplicationRunner(
+		WithServices(comp1),
+		WithServices(comp2),
+	)
+
+	if len(runner.services) != 2 {
+		t.Errorf("WithServices() added %d services, want 2", len(runner.services))
+	}
+}
