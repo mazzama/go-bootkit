@@ -7,6 +7,29 @@ import (
 	"time"
 )
 
+// NeverReadyComponent implements Component but never signals ready
+type NeverReadyComponent struct {
+	name string
+}
+
+func (n *NeverReadyComponent) Name() string {
+	return n.name
+}
+
+func (n *NeverReadyComponent) Start(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (n *NeverReadyComponent) Stop(ctx context.Context) error {
+	return nil
+}
+
+func (n *NeverReadyComponent) Ready() <-chan struct{} {
+	ch := make(chan struct{})
+	return ch // Never closed
+}
+
 func TestNewApplicationRunner(t *testing.T) {
 	logger := slog.Default()
 
@@ -99,4 +122,22 @@ func TestApplicationRunner_GracefulShutdown(t *testing.T) {
 
 	// Wait for graceful shutdown
 	time.Sleep(200 * time.Millisecond)
+}
+
+func TestApplicationRunner_StartDeadline(t *testing.T) {
+	ctx := context.Background()
+
+	slowComp := &NeverReadyComponent{
+		name: "slow-svc",
+	}
+
+	runner := NewApplicationRunner(
+		WithServices(slowComp),
+		WithStartDeadline(50*time.Millisecond),
+	)
+
+	err := runner.Run(ctx)
+	if err == nil {
+		t.Error("Run() should return error when start deadline exceeded")
+	}
 }
