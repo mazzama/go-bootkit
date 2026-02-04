@@ -7,6 +7,7 @@ import (
 
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
+	"github.com/go-chi/chi/v5"
 )
 
 // Task 14: Test ServerKit - WebServer Creation
@@ -63,5 +64,30 @@ func TestWebServer_Name(t *testing.T) {
 	server := NewWebServer("test-name", ":8080", WithHealthAggregator(healthkit.NewAggregator(0)))
 	if server.Name() != "test-name" {
 		t.Errorf("Name() = %v, want 'test-name'", server.Name())
+	}
+}
+
+// Task 16: Test ServerKit - Router Access
+
+func TestWebServer_Router(t *testing.T) {
+	server := NewWebServer("test", ":8080", WithHealthAggregator(healthkit.NewAggregator(0)))
+
+	router := server.Router()
+	if router == nil {
+		t.Fatal("Router() = nil, want non-nil")
+	}
+
+	// Verify it's a chi.Mux
+	var _ chi.Router = router
+}
+
+func TestWebServer_Health(t *testing.T) {
+	health := healthkit.NewAggregator(5 * time.Second)
+	server := NewWebServer("test", ":8080",
+		WithHealthAggregator(health),
+	)
+
+	if server.Health() != health {
+		t.Error("Health() should return configured aggregator")
 	}
 }
