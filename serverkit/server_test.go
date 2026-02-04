@@ -3,6 +3,7 @@ package serverkit
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -118,4 +119,57 @@ func TestWebServer_Ready(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Error("Ready() channel not closed within timeout")
 	}
+}
+
+// Task 18: Test ServerKit - Start and Stop
+
+func TestWebServer_Start_Stop(t *testing.T) {
+	server := NewWebServer("test", ":8082", WithHealthAggregator(healthkit.NewAggregator(0)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.Start(ctx) }()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Test that server is responding
+	resp, err := http.Get("http://localhost:8082/health/liveness")
+	if err != nil {
+		t.Fatalf("server not responding: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("health endpoint returned %d, want 200", resp.StatusCode)
+	}
+
+	// Stop server
+	cancel()
+	err = <-errCh
+	if err != context.Canceled {
+		t.Errorf("Start() = %v, want context.Canceled", err)
+	}
+}
+
+func TestWebServer_Stop(t *testing.T) {
+	server := NewWebServer("test", ":8083", WithHealthAggregator(healthkit.NewAggregator(0)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = server.Start(ctx)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+
+	err := server.Stop(stopCtx)
+	if err != nil {
+		t.Errorf("Stop() = %v, want nil", err)
+	}
+
+	cancel()
 }
