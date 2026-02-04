@@ -182,3 +182,52 @@ func TestAggregator_evaluate_Timeout(t *testing.T) {
 		t.Error("evaluate() should timeout and return error")
 	}
 }
+
+func TestAggregator_evaluate_Caching(t *testing.T) {
+	callCount := 0
+	a := NewAggregator(100 * time.Millisecond)
+	a.Register(
+		Check{
+			Name: "cached-check",
+			Kind: Liveness,
+			Fn: func(ctx context.Context) error {
+				callCount++
+				return nil
+			},
+		},
+	)
+
+	ctx := context.Background()
+
+	// First call
+	err := a.evaluate(ctx, Liveness)
+	if err != nil {
+		t.Fatalf("first evaluate() = %v, want nil", err)
+	}
+	firstCount := callCount
+
+	// Second call within cache TTL
+	err = a.evaluate(ctx, Liveness)
+	if err != nil {
+		t.Fatalf("second evaluate() = %v, want nil", err)
+	}
+	secondCount := callCount
+
+	if secondCount != firstCount {
+		t.Errorf("cached evaluate() called check %d times, want %d", secondCount, firstCount)
+	}
+
+	// Wait for cache to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// Third call after cache expiry
+	err = a.evaluate(ctx, Liveness)
+	if err != nil {
+		t.Fatalf("third evaluate() = %v, want nil", err)
+	}
+	thirdCount := callCount
+
+	if thirdCount != firstCount+1 {
+		t.Errorf("post-cache evaluate() called check %d times, want %d", thirdCount, firstCount+1)
+	}
+}
