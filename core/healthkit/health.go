@@ -17,6 +17,10 @@ const (
 	Startup
 )
 
+func (k Kind) String() string {
+	return string(rune('0' + k))
+}
+
 type Check struct {
 	Name    string
 	Kind    Kind
