@@ -1,6 +1,7 @@
 package serverkit
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -89,5 +90,32 @@ func TestWebServer_Health(t *testing.T) {
 
 	if server.Health() != health {
 		t.Error("Health() should return configured aggregator")
+	}
+}
+
+// Task 17: Test ServerKit - Ready Channel
+
+func TestWebServer_Ready(t *testing.T) {
+	server := NewWebServer("test", ":8081", WithHealthAggregator(healthkit.NewAggregator(0)))
+
+	readyCh := server.Ready()
+	if readyCh == nil {
+		t.Fatal("Ready() = nil, want channel")
+	}
+
+	// Start server in background
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = server.Start(ctx)
+	}()
+
+	// Wait for ready signal or timeout
+	select {
+	case <-readyCh:
+		// Success
+	case <-time.After(2 * time.Second):
+		t.Error("Ready() channel not closed within timeout")
 	}
 }
