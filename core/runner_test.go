@@ -76,3 +76,27 @@ func TestApplicationRunner_Run_StartsServices(t *testing.T) {
 	// Wait a bit for services to start
 	time.Sleep(50 * time.Millisecond)
 }
+
+func TestApplicationRunner_GracefulShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	comp := &TestMockComponent{
+		name:    "test-svc",
+		readyCh: make(chan struct{}),
+	}
+
+	go func() {
+		runner := NewApplicationRunner(
+			WithServices(comp),
+			WithShutdownTimeout(100*time.Millisecond),
+		)
+		_ = runner.Run(ctx)
+	}()
+
+	// Let service start
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Wait for graceful shutdown
+	time.Sleep(200 * time.Millisecond)
+}
