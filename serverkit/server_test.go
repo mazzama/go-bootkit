@@ -216,3 +216,41 @@ func TestWebServer_HealthEndpoints(t *testing.T) {
 		})
 	}
 }
+
+// Task 20: Test ServerKit - Custom Middleware
+
+func TestWebServer_CustomMiddleware(t *testing.T) {
+	middlewareCalled := false
+	customMW := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			middlewareCalled = true
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	server := NewWebServer("test", ":8085",
+		WithCustomMiddleware(customMW),
+		WithHealthAggregator(healthkit.NewAggregator(0)),
+	)
+
+	// Add a test route
+	server.Router().Get("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = server.Start(ctx) }()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:8085/test")
+	if err != nil {
+		t.Fatalf("GET /test: %v", err)
+	}
+	resp.Body.Close()
+
+	if !middlewareCalled {
+		t.Error("custom middleware was not called")
+	}
+}
