@@ -166,8 +166,12 @@ func TestAggregator_evaluate_Timeout(t *testing.T) {
 			Kind:    Liveness,
 			Timeout: 10 * time.Millisecond,
 			Fn: func(ctx context.Context) error {
-				time.Sleep(100 * time.Millisecond)
-				return nil
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(100 * time.Millisecond):
+					return nil
+				}
 			},
 		},
 	)
