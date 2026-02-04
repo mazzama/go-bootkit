@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
@@ -48,5 +49,19 @@ func TestNewWebServer_Defaults(t *testing.T) {
 	}
 	if server.logger != nil {
 		t.Error("logger should be nil by default")
+	}
+}
+
+// Task 15: Test ServerKit - Component Interface
+
+func TestWebServer_ComponentInterface(t *testing.T) {
+	var _ core.Component = (*WebServer)(nil)
+	var _ core.Readyable = (*WebServer)(nil)
+}
+
+func TestWebServer_Name(t *testing.T) {
+	server := NewWebServer("test-name", ":8080", WithHealthAggregator(healthkit.NewAggregator(0)))
+	if server.Name() != "test-name" {
+		t.Errorf("Name() = %v, want 'test-name'", server.Name())
 	}
 }
