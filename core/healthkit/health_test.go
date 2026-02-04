@@ -2,6 +2,8 @@ package healthkit
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,5 +119,41 @@ func TestAggregator_Register(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAggregator_evaluate_Success(t *testing.T) {
+	a := NewAggregator(0)
+	a.Register(
+		Check{Name: "check1", Kind: Liveness, Fn: func(ctx context.Context) error { return nil }},
+		Check{Name: "check2", Kind: Liveness, Fn: func(ctx context.Context) error { return nil }},
+	)
+
+	ctx := context.Background()
+	err := a.evaluate(ctx, Liveness)
+	if err != nil {
+		t.Errorf("evaluate() = %v, want nil", err)
+	}
+}
+
+func TestAggregator_evaluate_Failure(t *testing.T) {
+	a := NewAggregator(0)
+	a.Register(
+		Check{Name: "check1", Kind: Liveness, Fn: func(ctx context.Context) error { return fmt.Errorf("failed1") }},
+		Check{Name: "check2", Kind: Liveness, Fn: func(ctx context.Context) error { return fmt.Errorf("failed2") }},
+	)
+
+	ctx := context.Background()
+	err := a.evaluate(ctx, Liveness)
+	if err == nil {
+		t.Error("evaluate() = nil, want error")
+	} else {
+		// Both error messages should be present
+		if !strings.Contains(err.Error(), "check1:") {
+			t.Errorf("error should contain 'check1:', got %v", err)
+		}
+		if !strings.Contains(err.Error(), "check2:") {
+			t.Errorf("error should contain 'check2:', got %v", err)
+		}
 	}
 }
