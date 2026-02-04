@@ -3,6 +3,8 @@ package healthkit
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -229,5 +231,84 @@ func TestAggregator_evaluate_Caching(t *testing.T) {
 
 	if thirdCount != firstCount+1 {
 		t.Errorf("post-cache evaluate() called check %d times, want %d", thirdCount, firstCount+1)
+	}
+}
+
+func TestAggregator_AllKinds(t *testing.T) {
+	a := NewAggregator(0)
+
+	for _, kind := range []Kind{Liveness, Readiness, Startup} {
+		t.Run(kind.String(), func(t *testing.T) {
+			a.Register(
+				Check{Name: kind.String(), Kind: kind, Fn: func(ctx context.Context) error { return nil }},
+			)
+
+			ctx := context.Background()
+			err := a.evaluate(ctx, kind)
+			if err != nil {
+				t.Errorf("evaluate(%v) = %v, want nil", kind, err)
+			}
+		})
+	}
+}
+
+func TestKind_String(t *testing.T) {
+	tests := []struct {
+		kind Kind
+		want string
+	}{
+		{Liveness, "0"},
+		{Readiness, "1"},
+		{Startup, "2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := tt.kind.String(); got != tt.want {
+				t.Errorf("Kind.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAggregator_Handler_Success(t *testing.T) {
+	a := NewAggregator(0)
+	a.Register(
+		Check{Name: "ok", Kind: Liveness, Fn: func(ctx context.Context) error { return nil }},
+	)
+
+	handler := a.Handler(Liveness)
+	req := httptest.NewRequest("GET", "/health/liveness", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Handler() status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	body := rec.Body.String()
+	if body != "ok" {
+		t.Errorf("Handler() body = %q, want 'ok'", body)
+	}
+}
+
+func TestAggregator_Handler_Failure(t *testing.T) {
+	a := NewAggregator(0)
+	a.Register(
+		Check{Name: "bad", Kind: Liveness, Fn: func(ctx context.Context) error { return fmt.Errorf("failed") }},
+	)
+
+	handler := a.Handler(Liveness)
+	req := httptest.NewRequest("GET", "/health/liveness", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("Handler() status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "bad:") {
+		t.Errorf("Handler() body should contain error, got %q", body)
 	}
 }
