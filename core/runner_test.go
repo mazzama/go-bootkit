@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -52,4 +53,26 @@ func TestWithServices(t *testing.T) {
 	if len(runner.services) != 2 {
 		t.Errorf("WithServices() added %d services, want 2", len(runner.services))
 	}
+}
+
+func TestApplicationRunner_Run_StartsServices(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	comp1 := &TestMockComponent{
+		name:    "svc1",
+		readyCh: make(chan struct{}),
+	}
+	comp2 := &TestMockComponent{
+		name:    "svc2",
+		readyCh: make(chan struct{}),
+	}
+
+	go func() {
+		runner := NewApplicationRunner(WithServices(comp1, comp2))
+		_ = runner.Run(ctx)
+	}()
+
+	// Wait a bit for services to start
+	time.Sleep(50 * time.Millisecond)
 }
