@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
@@ -189,3 +190,6 @@ func (ws *WebServer) setupHealthEndpoints() {
 	ws.router.Get("/health/startup", ws.health.Handler(healthkit.Startup))
 	ws.router.Get("/health", ws.health.Handler(healthkit.Liveness))
 }
+
+var _ core.Component = (*WebServer)(nil)
+var _ core.Readyable = (*WebServer)(nil)

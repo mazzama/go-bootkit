@@ -120,10 +120,11 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 			Kind:    healthkit.Liveness,
 			Timeout: 2 * time.Second,
 			Fn: func(ctx context.Context) error {
-				if db.pool == nil {
+				pool := db.Pool()
+				if pool == nil {
 					return fmt.Errorf("db is not initialized")
 				}
-				return db.pool.Ping(ctx)
+				return pool.Ping(ctx)
 			},
 		},
 		{
@@ -131,7 +132,7 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 			Kind:    healthkit.Readiness,
 			Timeout: 2 * time.Second,
 			Fn: func(ctx context.Context) error {
-				if db.pool == nil {
+				if db.Pool() == nil {
 					return fmt.Errorf("db is not initialized")
 				}
 				select {
