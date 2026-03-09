@@ -1,0 +1,108 @@
+package cachekit
+
+import (
+	"testing"
+	"time"
+
+	"github.com/mazzama/go-bootkit/core/healthkit"
+	"github.com/redis/go-redis/v9"
+)
+
+func TestWithName(t *testing.T) {
+	cache := &RedisCache{name: "default"}
+	WithName("custom")(cache)
+	if cache.name != "custom" {
+		t.Errorf("expected 'custom', got %q", cache.name)
+	}
+}
+
+func TestWithAddress(t *testing.T) {
+	cache := &RedisCache{options: defaultOptions()}
+	WithAddress("redis:6380")(cache)
+	if cache.options.Addr != "redis:6380" {
+		t.Errorf("expected 'redis:6380', got %q", cache.options.Addr)
+	}
+}
+
+func TestWithPassword(t *testing.T) {
+	cache := &RedisCache{options: defaultOptions()}
+	WithPassword("secret")(cache)
+	if cache.options.Password != "secret" {
+		t.Errorf("expected 'secret', got %q", cache.options.Password)
+	}
+}
+
+func TestWithDB(t *testing.T) {
+	cache := &RedisCache{options: defaultOptions()}
+	WithDB(3)(cache)
+	if cache.options.DB != 3 {
+		t.Errorf("expected 3, got %d", cache.options.DB)
+	}
+}
+
+func TestWithUsername(t *testing.T) {
+	cache := &RedisCache{options: defaultOptions()}
+	WithUsername("admin")(cache)
+	if cache.options.Username != "admin" {
+		t.Errorf("expected 'admin', got %q", cache.options.Username)
+	}
+}
+
+func TestName(t *testing.T) {
+	cache := &RedisCache{name: "my-cache"}
+	if cache.Name() != "my-cache" {
+		t.Errorf("expected 'my-cache', got %q", cache.Name())
+	}
+}
+
+func TestReadyChannel(t *testing.T) {
+	cache := &RedisCache{readyChan: make(chan struct{})}
+	ch := cache.Ready()
+	if ch == nil {
+		t.Fatal("expected non-nil ready channel")
+	}
+
+	select {
+	case <-ch:
+		t.Fatal("expected channel to be open (not ready yet)")
+	default:
+		// correct: channel is open
+	}
+}
+
+func TestHealthChecksReturnsTwoChecks(t *testing.T) {
+	cache := &RedisCache{
+		name:      "test-redis",
+		readyChan: make(chan struct{}),
+	}
+
+	checks := cache.HealthChecks()
+	if len(checks) != 2 {
+		t.Fatalf("expected 2 health checks, got %d", len(checks))
+	}
+
+	if checks[0].Name != "test-redis-liveness" {
+		t.Errorf("expected 'test-redis-liveness', got %q", checks[0].Name)
+	}
+	if checks[0].Kind != healthkit.Liveness {
+		t.Errorf("expected Liveness kind")
+	}
+	if checks[0].Timeout != 2*time.Second {
+		t.Errorf("expected 2s timeout, got %v", checks[0].Timeout)
+	}
+
+	if checks[1].Name != "test-redis-readiness" {
+		t.Errorf("expected 'test-redis-readiness', got %q", checks[1].Name)
+	}
+	if checks[1].Kind != healthkit.Readiness {
+		t.Errorf("expected Readiness kind")
+	}
+}
+
+func defaultOptions() *redis.Options {
+	return &redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+	}
+}
