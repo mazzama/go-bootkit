@@ -1,8 +1,10 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +18,7 @@ type mockComponent struct {
 	stopped atomic.Bool
 	readyCh chan struct{}
 	startFn func(ctx context.Context) error
+	stopFn  func(ctx context.Context) error
 }
 
 func (m *mockComponent) Name() string { return m.name }
@@ -29,8 +32,11 @@ func (m *mockComponent) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockComponent) Stop(_ context.Context) error {
+func (m *mockComponent) Stop(ctx context.Context) error {
 	m.stopped.Store(true)
+	if m.stopFn != nil {
+		return m.stopFn(ctx)
+	}
 	return nil
 }
 
@@ -158,5 +164,42 @@ func TestRunStartDeadlineExceeded(t *testing.T) {
 	expected := "slow-svc: start deadline exceeded (100ms)"
 	if !strings.Contains(err.Error(), expected) {
 		t.Errorf("expected error to contain %q, got %q", expected, err.Error())
+	}
+}
+
+func TestRunLogsShutdownErrors(t *testing.T) {
+	readyCh := make(chan struct{})
+	svc := &mockComponent{
+		name:    "failing-shutdown",
+		readyCh: readyCh,
+		startFn: func(ctx context.Context) error {
+			close(readyCh)
+			<-ctx.Done()
+			return nil
+		},
+		stopFn: func(_ context.Context) error {
+			return errors.New("shutdown failed")
+		},
+	}
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	r := NewApplicationRunner(
+		WithServices(svc),
+		WithLogger(logger),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_ = r.Run(ctx)
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "shutdown failed") {
+		t.Errorf("expected log output to contain 'shutdown failed', got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "failing-shutdown") {
+		t.Errorf("expected log output to contain 'failing-shutdown', got: %s", logOutput)
 	}
 }

@@ -106,12 +106,32 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 
 	shCtx, cancel := context.WithTimeout(context.Background(), r.shutdownTimeout)
 	defer cancel()
+
 	var wg sync.WaitGroup
 	wg.Add(len(r.services))
+
+	// Channel to collect shutdown errors
+	errCh := make(chan error, len(r.services))
 	for _, s := range r.services {
 		svc := s
-		go func() { defer wg.Done(); _ = svc.Stop(shCtx) }()
+		go func() {
+			defer wg.Done()
+			if err := svc.Stop(shCtx); err != nil {
+				errCh <- fmt.Errorf("%s: shutdown error: %w", svc.Name(), err)
+			}
+		}()
 	}
+
+	// Wait for all shutdowns to complete
 	wg.Wait()
+	close(errCh)
+
+	// Log any shutdown errors
+	if r.logger != nil {
+		for err := range errCh {
+			r.logger.Error("Service shutdown error", "error", err)
+		}
+	}
+
 	return err
 }
