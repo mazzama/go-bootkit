@@ -257,9 +257,9 @@ func TestKind_String(t *testing.T) {
 		kind Kind
 		want string
 	}{
-		{Liveness, "0"},
-		{Readiness, "1"},
-		{Startup, "2"},
+		{Liveness, "liveness"},
+		{Readiness, "readiness"},
+		{Startup, "startup"},
 	}
 
 	for _, tt := range tests {
