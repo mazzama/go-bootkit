@@ -12,11 +12,11 @@ import (
 )
 
 type RedisCache struct {
-	name      string
 	client    *redis.Client
 	options   *redis.Options
-	mu        sync.RWMutex
 	readyChan chan struct{}
+	name      string
+	mu        sync.RWMutex
 }
 
 type RedisOption func(*RedisCache)

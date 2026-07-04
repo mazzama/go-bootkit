@@ -13,11 +13,11 @@ import (
 )
 
 type PostgresDB struct {
+	pool      *pgxpool.Pool
+	readyChan chan struct{}
 	name      string
 	connStr   string
-	pool      *pgxpool.Pool
 	mu        sync.RWMutex
-	readyChan chan struct{}
 }
 
 type PostgresOption func(*PostgresDB)

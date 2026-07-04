@@ -69,7 +69,7 @@ func TestWithCustomMiddleware(t *testing.T) {
 
 	ws.Router().Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("pong"))
+		_, _ = w.Write([]byte("pong")) //nolint:errcheck
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -181,7 +181,7 @@ func TestStartAndStop(t *testing.T) {
 	// Verify liveness endpoint works while server is up (before Stop)
 	resp, err := http.Get("http://" + ws.server.Addr + "/health/liveness")
 	if err == nil {
-		_, _ = io.ReadAll(resp.Body)
+		_, _ = io.ReadAll(resp.Body) //nolint:errcheck
 		resp.Body.Close()
 	}
 
