@@ -7,3 +7,5 @@ require (
 	github.com/go-chi/httplog/v3 v3.2.2
 	github.com/mazzama/go-bootkit/core v0.1.3
 )
+
+require golang.org/x/sync v0.16.0 // indirect
