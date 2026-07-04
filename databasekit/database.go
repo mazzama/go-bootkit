@@ -22,7 +22,7 @@ type PostgresDB struct {
 
 type PostgresOption func(*PostgresDB)
 
-func NewPostgresDB(ctx context.Context, options ...PostgresOption) (*PostgresDB, error) {
+func NewPostgresDB(options ...PostgresOption) *PostgresDB {
 	db := &PostgresDB{
 		name:      "postgres-db",
 		connStr:   "postgres://postgres:postgres@localhost:5432/postgres",
@@ -33,22 +33,7 @@ func NewPostgresDB(ctx context.Context, options ...PostgresOption) (*PostgresDB,
 		option(db)
 	}
 
-	config, errParse := pgxpool.ParseConfig(db.connStr)
-	if errParse != nil {
-		return nil, fmt.Errorf("failed to parse connection string: %w", errParse)
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create connection pool: %w", err)
-	}
-
-	if errPing := pool.Ping(ctx); errPing != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", errPing)
-	}
-
-	db.pool = pool
-	return db, nil
+	return db
 }
 
 func WithDBName(name string) PostgresOption {
@@ -68,6 +53,24 @@ func (db *PostgresDB) Name() string {
 }
 
 func (db *PostgresDB) Start(ctx context.Context) error {
+	config, errParse := pgxpool.ParseConfig(db.connStr)
+	if errParse != nil {
+		return fmt.Errorf("failed to parse connection string: %w", errParse)
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return fmt.Errorf("failed to create connection pool: %w", err)
+	}
+
+	if errPing := pool.Ping(ctx); errPing != nil {
+		return fmt.Errorf("failed to connect to database: %w", errPing)
+	}
+
+	db.mu.Lock()
+	db.pool = pool
+	db.mu.Unlock()
+
 	close(db.readyChan)
 	<-ctx.Done()
 	return nil
