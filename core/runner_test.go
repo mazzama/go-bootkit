@@ -13,12 +13,12 @@ import (
 
 // mockComponent implements both Component and Readyable interfaces.
 type mockComponent struct {
-	name    string
-	started atomic.Bool
-	stopped atomic.Bool
 	readyCh chan struct{}
 	startFn func(ctx context.Context) error
 	stopFn  func(ctx context.Context) error
+	name    string
+	started atomic.Bool
+	stopped atomic.Bool
 }
 
 func (m *mockComponent) Name() string { return m.name }
@@ -108,7 +108,7 @@ func TestRunStartsAndStopsServices(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_ = r.Run(ctx)
+	_ = r.Run(ctx) //nolint:errcheck
 
 	if !svc.started.Load() {
 		t.Error("expected service to be started")
@@ -193,7 +193,7 @@ func TestRunLogsShutdownErrors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_ = r.Run(ctx)
+	_ = r.Run(ctx) //nolint:errcheck
 
 	logOutput := logBuf.String()
 	if !strings.Contains(logOutput, "shutdown failed") {

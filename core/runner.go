@@ -15,10 +15,10 @@ import (
 
 type ApplicationRunner struct {
 	logger          *slog.Logger
-	mu              sync.Mutex
+	services        []Component
 	startDeadline   time.Duration
 	shutdownTimeout time.Duration
-	services        []Component
+	mu              sync.Mutex
 }
 
 type Option func(*ApplicationRunner)
@@ -116,8 +116,8 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 		svc := s
 		go func() {
 			defer wg.Done()
-			if err := svc.Stop(shCtx); err != nil {
-				errCh <- fmt.Errorf("%s: shutdown error: %w", svc.Name(), err)
+			if stopErr := svc.Stop(shCtx); stopErr != nil {
+				errCh <- fmt.Errorf("%s: shutdown error: %w", svc.Name(), stopErr)
 			}
 		}()
 	}

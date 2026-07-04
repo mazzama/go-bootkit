@@ -18,16 +18,16 @@ import (
 )
 
 type WebServer struct {
-	name              string
-	addr              string
+	listener          net.Listener
 	server            *http.Server
 	router            *chi.Mux
 	health            *healthkit.Aggregator
 	logger            *slog.Logger
 	readyCh           chan struct{}
 	shutdownCh        chan struct{}
+	name              string
+	addr              string
 	customMiddlewares []func(http.Handler) http.Handler
-	listener          net.Listener
 }
 
 type WebServerOption func(*WebServer)

@@ -18,19 +18,18 @@ const (
 )
 
 type Check struct {
+	Fn      func(ctx context.Context) error
 	Name    string
 	Kind    Kind
 	Timeout time.Duration
-	Fn      func(ctx context.Context) error
 }
 
 type Aggregator struct {
-	mu     sync.RWMutex
-	checks map[Kind][]Check
-
-	cacheTTL time.Duration
-	cacheAt  [3]int64
 	cacheErr [3]atomic.Value
+	checks   map[Kind][]Check
+	cacheAt  [3]int64
+	cacheTTL time.Duration
+	mu       sync.RWMutex
 }
 
 func NewAggregator(cacheTTL time.Duration) *Aggregator {
@@ -56,11 +55,11 @@ func (a *Aggregator) Handler(kind Kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := a.evaluate(r.Context(), kind); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(err.Error()))
+			_, _ = w.Write([]byte(err.Error())) //nolint:errcheck
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok")) //nolint:errcheck
 	}
 }
 
@@ -70,7 +69,7 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 
 	if a.cacheTTL > 0 && now.Sub(last) < a.cacheTTL {
 		if v := a.cacheErr[kind].Load(); v != nil {
-			if err, _ := v.(error); err != nil {
+			if err, ok := v.(error); ok && err != nil {
 				return err
 			}
 		}
