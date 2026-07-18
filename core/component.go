@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
 
 type Component interface {
 	Name() string
@@ -10,4 +13,8 @@ type Component interface {
 
 type Readyable interface {
 	Ready() <-chan struct{}
+}
+
+type Loggable interface {
+	SetLogger(logger *slog.Logger)
 }

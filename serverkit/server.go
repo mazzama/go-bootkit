@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/httplog/v3"
@@ -17,12 +19,42 @@ import (
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
+type dynamicHandler struct {
+	mu     sync.RWMutex
+	target slog.Handler
+}
+
+func (h *dynamicHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.target.Enabled(ctx, level)
+}
+
+func (h *dynamicHandler) Handle(ctx context.Context, r slog.Record) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.target.Handle(ctx, r)
+}
+
+func (h *dynamicHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return &dynamicHandler{target: h.target.WithAttrs(attrs)}
+}
+
+func (h *dynamicHandler) WithGroup(name string) slog.Handler {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return &dynamicHandler{target: h.target.WithGroup(name)}
+}
+
 type WebServer struct {
 	listener          net.Listener
 	server            *http.Server
 	router            *chi.Mux
 	health            *healthkit.Aggregator
 	logger            *slog.Logger
+	dynHandler        *dynamicHandler
 	readyCh           chan struct{}
 	shutdownCh        chan struct{}
 	name              string
@@ -43,8 +75,17 @@ func NewWebServer(name, addr string, options ...WebServerOption) *WebServer {
 		shutdownCh: make(chan struct{}),
 	}
 
+	ws.dynHandler = &dynamicHandler{
+		target: slog.NewTextHandler(io.Discard, nil),
+	}
+
 	for _, option := range options {
 		option(ws)
+	}
+
+	// If no logger was explicitly provided via option, use the dynamic proxy
+	if ws.logger == nil {
+		ws.logger = slog.New(ws.dynHandler)
 	}
 
 	ws.setupMiddleware()
@@ -196,3 +237,12 @@ func (ws *WebServer) setupHealthEndpoints() {
 
 var _ core.Component = (*WebServer)(nil)
 var _ core.Readyable = (*WebServer)(nil)
+var _ core.Loggable = (*WebServer)(nil)
+
+func (ws *WebServer) SetLogger(logger *slog.Logger) {
+	if logger != nil {
+		ws.dynHandler.mu.Lock()
+		ws.dynHandler.target = logger.Handler()
+		ws.dynHandler.mu.Unlock()
+	}
+}

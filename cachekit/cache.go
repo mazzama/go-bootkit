@@ -3,6 +3,7 @@ package cachekit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ type RedisCache struct {
 	options   *redis.Options
 	readyChan chan struct{}
 	name      string
+	logger    *slog.Logger
 	mu        sync.RWMutex
 }
 
@@ -161,5 +163,12 @@ func (r *RedisCache) HealthChecks() []healthkit.Check {
 	}
 }
 
+func (r *RedisCache) SetLogger(logger *slog.Logger) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.logger = logger
+}
+
 var _ core.Component = (*RedisCache)(nil)
 var _ core.Readyable = (*RedisCache)(nil)
+var _ core.Loggable = (*RedisCache)(nil)

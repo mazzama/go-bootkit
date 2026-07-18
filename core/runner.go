@@ -66,6 +66,16 @@ func WithServices(services ...Component) Option {
 }
 
 func (r *ApplicationRunner) Run(ctx context.Context) error {
+	if r.logger != nil {
+		r.mu.Lock()
+		for _, s := range r.services {
+			if loggable, ok := s.(Loggable); ok {
+				loggable.SetLogger(r.logger)
+			}
+		}
+		r.mu.Unlock()
+	}
+
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

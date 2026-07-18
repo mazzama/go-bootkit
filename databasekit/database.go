@@ -3,6 +3,7 @@ package databasekit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ type PostgresDB struct {
 	readyChan chan struct{}
 	name      string
 	connStr   string
+	logger    *slog.Logger
 	mu        sync.RWMutex
 }
 
@@ -151,5 +153,12 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 	}
 }
 
+func (db *PostgresDB) SetLogger(logger *slog.Logger) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	db.logger = logger
+}
+
 var _ core.Component = (*PostgresDB)(nil)
 var _ core.Readyable = (*PostgresDB)(nil)
+var _ core.Loggable = (*PostgresDB)(nil)
