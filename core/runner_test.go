@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -299,5 +300,99 @@ func TestRunPropagatesHealthChecks(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 OK from health handler, got %d", rec.Code)
+	}
+}
+
+func TestRunShutdownOrder(t *testing.T) {
+	var stopOrder []string
+	var mu sync.Mutex
+
+	createSvc := func(name string) *mockComponent {
+		readyCh := make(chan struct{})
+		return &mockComponent{
+			name:    name,
+			readyCh: readyCh,
+			startFn: func(ctx context.Context) error {
+				close(readyCh)
+				<-ctx.Done()
+				return nil
+			},
+			stopFn: func(ctx context.Context) error {
+				mu.Lock()
+				stopOrder = append(stopOrder, name)
+				mu.Unlock()
+				return nil
+			},
+		}
+	}
+
+	svc1 := createSvc("svc1")
+	svc2 := createSvc("svc2")
+	svc3 := createSvc("svc3")
+
+	r := NewApplicationRunner(WithServices(svc1, svc2, svc3))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_ = r.Run(ctx)
+
+	expectedOrder := []string{"svc3", "svc2", "svc1"}
+	if len(stopOrder) != 3 {
+		t.Fatalf("expected 3 stopped services, got %d", len(stopOrder))
+	}
+	for i, name := range expectedOrder {
+		if stopOrder[i] != name {
+			t.Errorf("expected stopped service at index %d to be %s, got %s", i, name, stopOrder[i])
+		}
+	}
+}
+
+func TestRunReturnsShutdownErrors(t *testing.T) {
+	readyCh1 := make(chan struct{})
+	readyCh2 := make(chan struct{})
+
+	svc1 := &mockComponent{
+		name:    "svc1",
+		readyCh: readyCh1,
+		startFn: func(ctx context.Context) error {
+			close(readyCh1)
+			<-ctx.Done()
+			return nil
+		},
+		stopFn: func(ctx context.Context) error {
+			return errors.New("svc1 failed to stop")
+		},
+	}
+
+	svc2 := &mockComponent{
+		name:    "svc2",
+		readyCh: readyCh2,
+		startFn: func(ctx context.Context) error {
+			close(readyCh2)
+			<-ctx.Done()
+			return nil
+		},
+		stopFn: func(ctx context.Context) error {
+			return errors.New("svc2 failed to stop")
+		},
+	}
+
+	r := NewApplicationRunner(WithServices(svc1, svc2))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := r.Run(ctx)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+
+	// Verify both errors are returned in the joined error
+	if !strings.Contains(err.Error(), "svc1 failed to stop") {
+		t.Errorf("expected error to contain svc1 failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "svc2 failed to stop") {
+		t.Errorf("expected error to contain svc2 failure, got: %v", err)
 	}
 }

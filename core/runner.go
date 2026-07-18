@@ -113,10 +113,12 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 			if rr, ok := svc.(Readyable); ok && rr.Ready() != nil {
 				readyCh := rr.Ready()
 				eg.Go(func() error {
+					timer := time.NewTimer(r.startDeadline)
+					defer timer.Stop()
 					select {
 					case <-readyCh:
 						return nil
-					case <-time.After(r.startDeadline):
+					case <-timer.C:
 						cancelSvc()
 						return fmt.Errorf("%s: start deadline exceeded (%s)", svc.Name(), r.startDeadline)
 					case <-ctx.Done():
@@ -132,31 +134,24 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 	shCtx, cancel := context.WithTimeout(context.Background(), r.shutdownTimeout)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(len(r.services))
-
-	// Channel to collect shutdown errors
-	errCh := make(chan error, len(r.services))
-	for _, s := range r.services {
-		svc := s
-		go func() {
-			defer wg.Done()
-			if stopErr := svc.Stop(shCtx); stopErr != nil {
-				errCh <- fmt.Errorf("%s: shutdown error: %w", svc.Name(), stopErr)
+	var shutdownErrs []error
+	// Shutdown sequentially in reverse registration order
+	for i := len(r.services) - 1; i >= 0; i-- {
+		svc := r.services[i]
+		if stopErr := svc.Stop(shCtx); stopErr != nil {
+			wrappedErr := fmt.Errorf("%s: shutdown error: %w", svc.Name(), stopErr)
+			if r.logger != nil {
+				r.logger.Error("Service shutdown error", "error", wrappedErr)
 			}
-		}()
-	}
-
-	// Wait for all shutdowns to complete
-	wg.Wait()
-	close(errCh)
-
-	// Log any shutdown errors
-	if r.logger != nil {
-		for err := range errCh {
-			r.logger.Error("Service shutdown error", "error", err)
+			shutdownErrs = append(shutdownErrs, wrappedErr)
 		}
 	}
 
-	return err
+	var allErrs []error
+	if err != nil {
+		allErrs = append(allErrs, err)
+	}
+	allErrs = append(allErrs, shutdownErrs...)
+
+	return errors.Join(allErrs...)
 }
