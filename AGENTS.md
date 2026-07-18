@@ -14,4 +14,4 @@ Using the default five canonical triage roles. See [triage-labels.md](file:///Us
 
 ### Domain docs
 
-Multi-context layout configured around the workspace packages (`cachekit`, `configkit`, `core`, `databasekit`, `serverkit`). See [domain.md](file:///Users/mazzamabduljabbar/Documents/Repositories/personal/go-bootkit/docs/agents/domain.md).
+Multi-context layout configured around the workspace packages (`cachekit`, `core`, `databasekit`, `serverkit`). See [domain.md](file:///Users/mazzamabduljabbar/Documents/Repositories/personal/go-bootkit/docs/agents/domain.md).

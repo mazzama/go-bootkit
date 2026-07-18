@@ -22,9 +22,6 @@ This is a multi-context repo structured around Go modules:
 ├── cachekit/
 │   ├── CONTEXT.md
 │   └── docs/adr/                      ← cachekit decisions
-├── configkit/
-│   ├── CONTEXT.md
-│   └── docs/adr/                      ← configkit decisions
 ├── core/
 │   ├── CONTEXT.md
 │   └── docs/adr/                      ← core decisions
