@@ -77,7 +77,6 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 				return res.err
 			}
 		}
-		return nil
 	}
 
 	a.mu.RLock()
