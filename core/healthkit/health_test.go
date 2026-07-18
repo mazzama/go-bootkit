@@ -270,3 +270,89 @@ func containsAll(s string, substrs ...string) bool {
 	}
 	return true
 }
+
+func TestCacheRecovery(t *testing.T) {
+	var shouldFail int32 = 1
+	agg := NewAggregator(50 * time.Millisecond)
+	agg.Register(Check{
+		Name: "recovery-check",
+		Kind: Liveness,
+		Fn: func(ctx context.Context) error {
+			if atomic.LoadInt32(&shouldFail) == 1 {
+				return errors.New("temporary failure")
+			}
+			return nil
+		},
+	})
+
+	handler := agg.Handler(Liveness)
+
+	// 1. Initial check - fails
+	rec1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d", rec1.Code)
+	}
+
+	// 2. Recovery happens
+	atomic.StoreInt32(&shouldFail, 0)
+
+	// 3. Check within TTL - should still return cached 503
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected cached status 503 within TTL, got %d", rec2.Code)
+	}
+
+	// 4. Wait for TTL to expire
+	time.Sleep(100 * time.Millisecond)
+
+	// 5. Check after TTL - should run again, succeed, and return 200 OK
+	rec3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("expected status 200 after recovery and TTL expiry, got %d", rec3.Code)
+	}
+
+	// 6. Check again within TTL - should return cached 200 OK
+	rec4 := httptest.NewRecorder()
+	req4 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	handler.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusOK {
+		t.Fatalf("expected cached status 200 within TTL, got %d", rec4.Code)
+	}
+}
+
+func TestErrorsJoin(t *testing.T) {
+	agg := NewAggregator(0)
+	agg.Register(
+		Check{
+			Name: "check-1",
+			Kind: Liveness,
+			Fn:   func(ctx context.Context) error { return errors.New("err-1") },
+		},
+		Check{
+			Name: "check-2",
+			Kind: Liveness,
+			Fn:   func(ctx context.Context) error { return errors.New("err-2") },
+		},
+	)
+
+	err := agg.evaluate(context.Background(), Liveness)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+
+	// Verify we can find individual errors using errors.Unwrap/errors.As via the Join interface
+	var errList []error
+	if joinErr, ok := err.(interface{ Unwrap() []error }); ok {
+		errList = joinErr.Unwrap()
+	}
+
+	if len(errList) != 2 {
+		t.Fatalf("expected 2 wrapped errors, got %v", len(errList))
+	}
+}

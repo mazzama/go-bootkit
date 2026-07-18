@@ -24,6 +24,10 @@ type Check struct {
 	Timeout time.Duration
 }
 
+type cachedResult struct {
+	err error
+}
+
 type Aggregator struct {
 	cacheErr [3]atomic.Value
 	checks   map[Kind][]Check
@@ -69,8 +73,8 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 
 	if a.cacheTTL > 0 && now.Sub(last) < a.cacheTTL {
 		if v := a.cacheErr[kind].Load(); v != nil {
-			if err, ok := v.(error); ok && err != nil {
-				return err
+			if res, ok := v.(cachedResult); ok {
+				return res.err
 			}
 		}
 		return nil
@@ -97,18 +101,13 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 	wg.Wait()
 	close(errCh)
 
-	var err error
+	var errs []error
 	for e := range errCh {
-		if err == nil {
-			err = e
-		} else {
-			err = errors.New(err.Error() + "; " + e.Error())
-		}
+		errs = append(errs, e)
 	}
+	err := errors.Join(errs...)
 
-	if err != nil {
-		a.cacheErr[kind].Store(err)
-	}
+	a.cacheErr[kind].Store(cachedResult{err: err})
 
 	atomic.StoreInt64(&a.cacheAt[kind], now.UnixNano())
 
