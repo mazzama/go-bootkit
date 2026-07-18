@@ -4,245 +4,203 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/go-chi/httplog/v3"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httplog/v3"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
-type dynamicHandler struct {
-	mu     sync.RWMutex
-	target slog.Handler
+type HTTPServer struct {
+	name       string
+	addr       string
+	handler    http.Handler
+	router     *chi.Mux // Nil if custom non-chi handler was passed directly
+	listener   net.Listener
+	server     *http.Server
+	readyCh    chan struct{}
+	shutdownCh chan struct{}
+	logger     *slog.Logger
+	mu         sync.RWMutex
 }
 
-func (h *dynamicHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.target.Enabled(ctx, level)
-}
+type HTTPServerOption func(*HTTPServer)
 
-func (h *dynamicHandler) Handle(ctx context.Context, r slog.Record) error {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.target.Handle(ctx, r)
-}
-
-func (h *dynamicHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return &dynamicHandler{target: h.target.WithAttrs(attrs)}
-}
-
-func (h *dynamicHandler) WithGroup(name string) slog.Handler {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return &dynamicHandler{target: h.target.WithGroup(name)}
-}
-
-type WebServer struct {
-	listener          net.Listener
-	server            *http.Server
-	router            *chi.Mux
-	health            *healthkit.Aggregator
-	logger            *slog.Logger
-	dynHandler        *dynamicHandler
-	readyCh           chan struct{}
-	shutdownCh        chan struct{}
-	name              string
-	addr              string
-	customMiddlewares []func(http.Handler) http.Handler
-}
-
-type WebServerOption func(*WebServer)
-
-func NewWebServer(name, addr string, options ...WebServerOption) *WebServer {
-	router := chi.NewRouter()
-
-	ws := &WebServer{
+func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServerOption) *HTTPServer {
+	srv := &HTTPServer{
 		name:       name,
 		addr:       addr,
-		router:     router,
+		handler:    handler,
 		readyCh:    make(chan struct{}),
 		shutdownCh: make(chan struct{}),
-	}
-
-	ws.dynHandler = &dynamicHandler{
-		target: slog.NewTextHandler(io.Discard, nil),
+		logger:     slog.Default(),
 	}
 
 	for _, option := range options {
-		option(ws)
+		option(srv)
 	}
 
-	// If no logger was explicitly provided via option, use the dynamic proxy
-	if ws.logger == nil {
-		ws.logger = slog.New(ws.dynHandler)
+	srv.server = &http.Server{
+		Addr:    addr,
+		Handler: handler,
 	}
 
-	ws.setupMiddleware()
-	ws.setupHealthEndpoints()
-	ws.server = &http.Server{
+	return srv
+}
+
+func NewDefaultHTTPServer(name, addr string, health *healthkit.Aggregator, options ...HTTPServerOption) *HTTPServer {
+	router := chi.NewRouter()
+
+	srv := &HTTPServer{
+		name:       name,
+		addr:       addr,
+		handler:    router,
+		router:     router,
+		readyCh:    make(chan struct{}),
+		shutdownCh: make(chan struct{}),
+		logger:     slog.Default(),
+	}
+
+	for _, option := range options {
+		option(srv)
+	}
+
+	// Register default request logging middleware using the server's logger
+	router.Use(httplog.RequestLogger(srv.logger, &httplog.Options{
+		Level:         slog.LevelInfo,
+		RecoverPanics: true,
+		Schema:        httplog.SchemaECS,
+	}))
+
+	router.Use(middleware.RequestID)
+	router.Use(middleware.RealIP)
+	router.Use(middleware.Recoverer)
+	router.Use(middleware.Timeout(60 * time.Second))
+
+	// Setup health routes if aggregator is provided
+	if health != nil {
+		router.Get("/health/liveness", health.Handler(healthkit.Liveness))
+		router.Get("/health/readiness", health.Handler(healthkit.Readiness))
+		router.Get("/health/startup", health.Handler(healthkit.Startup))
+		router.Get("/health", health.Handler(healthkit.Liveness))
+	}
+
+	srv.server = &http.Server{
 		Addr:    addr,
 		Handler: router,
 	}
 
-	return ws
+	return srv
 }
 
-func WithWebServerLogger(logger *slog.Logger) WebServerOption {
-	return func(ws *WebServer) {
-		ws.logger = logger
+func WithLogger(logger *slog.Logger) HTTPServerOption {
+	return func(s *HTTPServer) {
+		s.logger = logger
 	}
 }
 
-func WithCustomMiddleware(middlewares ...func(http.Handler) http.Handler) WebServerOption {
-	return func(ws *WebServer) {
-		ws.customMiddlewares = append(ws.customMiddlewares, middlewares...)
-	}
+func (s *HTTPServer) Name() string {
+	return s.name
 }
 
-func WithHealthAggregator(health *healthkit.Aggregator) WebServerOption {
-	return func(ws *WebServer) {
-		if health != nil {
-			ws.health = health
-		}
-	}
+func (s *HTTPServer) Ready() <-chan struct{} {
+	return s.readyCh
 }
 
-func (ws *WebServer) Name() string {
-	return ws.name
+func (s *HTTPServer) Router() *chi.Mux {
+	return s.router
 }
 
-func (ws *WebServer) Router() *chi.Mux {
-	return ws.router
-}
+func (s *HTTPServer) Start(ctx context.Context) error {
+	s.mu.RLock()
+	logger := s.logger
+	s.mu.RUnlock()
 
-func (ws *WebServer) Health() *healthkit.Aggregator {
-	return ws.health
-}
+	logger.Info("Starting HTTP server", "name", s.name, "addr", s.addr)
 
-func (ws *WebServer) Ready() <-chan struct{} {
-	return ws.readyCh
-}
-
-func (ws *WebServer) Start(ctx context.Context) error {
-	if ws.logger != nil {
-		ws.logger.Info("Starting web server", "name", ws.name, "addr", ws.addr)
-	}
-
-	listener, err := net.Listen("tcp", ws.addr)
+	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
-	ws.listener = listener
+	s.listener = listener
+
+	// Update the actual address in case a random port (:0) was used
+	s.server.Addr = listener.Addr().String()
 
 	go func() {
-		if err := ws.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			if ws.logger != nil {
-				ws.logger.Error("Web server error", "name", ws.name, "error", err)
-			}
+		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("HTTP server error", "name", s.name, "error", err)
 		}
 	}()
 
-	close(ws.readyCh)
-	if ws.logger != nil {
-		ws.logger.Info("Web server ready", "name", ws.name)
-	}
+	close(s.readyCh)
+	logger.Info("HTTP server ready", "name", s.name, "addr", s.server.Addr)
 
 	<-ctx.Done()
 	return ctx.Err()
 }
 
-func (ws *WebServer) Stop(ctx context.Context) error {
-	if ws.logger != nil {
-		ws.logger.Info("Stopping web server", "name", ws.name)
-	}
+func (s *HTTPServer) Stop(ctx context.Context) error {
+	s.mu.RLock()
+	logger := s.logger
+	s.mu.RUnlock()
 
-	if ws.listener != nil {
-		if err := ws.listener.Close(); err != nil {
-			if ws.logger != nil {
-				ws.logger.Error("Error closing listener", "name", ws.name, "error", err)
-			}
+	logger.Info("Stopping HTTP server", "name", s.name)
+
+	if s.listener != nil {
+		if err := s.listener.Close(); err != nil {
+			logger.Error("Error closing listener", "name", s.name, "error", err)
 		}
 	}
 
-	if err := ws.server.Shutdown(ctx); err != nil {
-		if ws.logger != nil {
-			ws.logger.Error("Error shutting down web server", "name", ws.name, "error", err)
-		}
+	if err := s.server.Shutdown(ctx); err != nil {
+		logger.Error("Error shutting down HTTP server", "name", s.name, "error", err)
 		return err
 	}
 
-	close(ws.shutdownCh)
-	if ws.logger != nil {
-		ws.logger.Info("Web server stopped", "name", ws.name)
-	}
+	close(s.shutdownCh)
+	logger.Info("HTTP server stopped", "name", s.name)
 	return nil
 }
 
-func (ws *WebServer) setupMiddleware() {
-	if ws.logger != nil {
-		ws.router.Use(httplog.RequestLogger(ws.logger, &httplog.Options{
-			Level:         slog.LevelInfo,
-			RecoverPanics: true,
-			Schema:        httplog.SchemaECS,
-		}))
-	}
-
-	ws.router.Use(middleware.RequestID)
-	ws.router.Use(middleware.RealIP)
-	ws.router.Use(middleware.Recoverer)
-	ws.router.Use(middleware.Timeout(60 * time.Second))
-
-	for _, mw := range ws.customMiddlewares {
-		ws.router.Use(mw)
+func (s *HTTPServer) SetLogger(logger *slog.Logger) {
+	if logger != nil {
+		s.mu.Lock()
+		s.logger = logger
+		s.mu.Unlock()
 	}
 }
 
-func (ws *WebServer) setupHealthEndpoints() {
-	ws.health.Register(healthkit.Check{
-		Name: "server",
-		Kind: healthkit.Liveness,
-		Fn: func(ctx context.Context) error {
-			return nil
+func (s *HTTPServer) HealthChecks() []healthkit.Check {
+	return []healthkit.Check{
+		{
+			Name: s.name + "-liveness",
+			Kind: healthkit.Liveness,
+			Fn: func(ctx context.Context) error {
+				return nil
+			},
 		},
-	},
-		healthkit.Check{
-			Name: "server",
+		{
+			Name: s.name + "-readiness",
 			Kind: healthkit.Readiness,
 			Fn: func(ctx context.Context) error {
 				select {
-				case <-ws.readyCh:
+				case <-s.readyCh:
 					return nil
 				default:
 					return fmt.Errorf("server not ready")
 				}
 			},
-		})
-
-	ws.router.Get("/health/liveness", ws.health.Handler(healthkit.Liveness))
-	ws.router.Get("/health/readiness", ws.health.Handler(healthkit.Readiness))
-	ws.router.Get("/health/startup", ws.health.Handler(healthkit.Startup))
-	ws.router.Get("/health", ws.health.Handler(healthkit.Liveness))
-}
-
-var _ core.Component = (*WebServer)(nil)
-var _ core.Readyable = (*WebServer)(nil)
-var _ core.Loggable = (*WebServer)(nil)
-
-func (ws *WebServer) SetLogger(logger *slog.Logger) {
-	if logger != nil {
-		ws.dynHandler.mu.Lock()
-		ws.dynHandler.target = logger.Handler()
-		ws.dynHandler.mu.Unlock()
+		},
 	}
 }
+
+var _ core.Component = (*HTTPServer)(nil)
+var _ core.Readyable = (*HTTPServer)(nil)
+var _ core.Loggable = (*HTTPServer)(nil)

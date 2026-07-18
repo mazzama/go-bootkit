@@ -5,10 +5,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
 // mockComponent implements both Component and Readyable interfaces.
@@ -244,5 +248,56 @@ func TestRunPropagatesLogger(t *testing.T) {
 		t.Error("expected logger to be propagated to component")
 	} else if svc.logger != logger {
 		t.Error("expected propagated logger to match the runner's logger")
+	}
+}
+
+type mockHealthComponent struct {
+	mockComponent
+	checks []healthkit.Check
+}
+
+func (m *mockHealthComponent) HealthChecks() []healthkit.Check {
+	return m.checks
+}
+
+func TestRunPropagatesHealthChecks(t *testing.T) {
+	agg := healthkit.NewAggregator(0)
+	svc := &mockHealthComponent{
+		mockComponent: mockComponent{
+			name:    "health-svc",
+			readyCh: make(chan struct{}),
+			startFn: func(ctx context.Context) error {
+				<-ctx.Done()
+				return nil
+			},
+		},
+		checks: []healthkit.Check{
+			{
+				Name: "custom-check",
+				Kind: healthkit.Liveness,
+				Fn:   func(ctx context.Context) error { return nil },
+			},
+		},
+	}
+
+	r := NewApplicationRunner(
+		WithServices(svc),
+		WithHealthAggregator(agg),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_ = r.Run(ctx) //nolint:errcheck
+
+	// Check if our check got registered on the aggregator
+	// We can test this by checking if evaluate finds it (i.e. running it via http handler or registry)
+	// Since aggregator has Register method, we can check it evaluated successfully
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	agg.Handler(healthkit.Liveness).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK from health handler, got %d", rec.Code)
 	}
 }

@@ -6,189 +6,156 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
-func newTestAggregator() *healthkit.Aggregator {
-	return healthkit.NewAggregator(0)
-}
+func TestNewHTTPServer(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	srv := NewHTTPServer("test-server", ":8080", handler)
 
-func TestNewWebServer(t *testing.T) {
-	agg := newTestAggregator()
-	ws := NewWebServer("test-server", ":8080", WithHealthAggregator(agg))
-
-	if ws.Name() != "test-server" {
-		t.Errorf("expected name 'test-server', got %q", ws.Name())
-	}
-	if ws.Router() == nil {
-		t.Error("expected router to be non-nil")
-	}
-	if ws.Health() == nil {
-		t.Error("expected health aggregator to be non-nil")
-	}
-	if ws.Health() != agg {
-		t.Error("expected health aggregator to be the one provided via option")
+	if srv.Name() != "test-server" {
+		t.Errorf("expected name 'test-server', got %q", srv.Name())
 	}
 }
 
-func TestWithWebServerLogger(t *testing.T) {
-	agg := newTestAggregator()
-	logger := slog.Default()
-	ws := NewWebServer("log-server", ":8080",
-		WithHealthAggregator(agg),
-		WithWebServerLogger(logger),
-	)
+func TestWithLogger(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewHTTPServer("test-server", ":8080", handler, WithLogger(logger))
 
-	if ws.logger == nil {
-		t.Error("expected logger to be set")
-	}
-	if ws.logger != logger {
-		t.Error("expected logger to match the one provided")
+	if srv.logger != logger {
+		t.Error("expected logger to match WithLogger option")
 	}
 }
 
-func TestWithCustomMiddleware(t *testing.T) {
-	agg := newTestAggregator()
+func TestSetLogger(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	srv := NewHTTPServer("test-server", ":8080", handler)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	var called atomic.Bool
-	mw := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called.Store(true)
-			next.ServeHTTP(w, r)
-		})
-	}
-
-	ws := NewWebServer("mw-server", ":8080",
-		WithHealthAggregator(agg),
-		WithCustomMiddleware(mw),
-	)
-
-	ws.Router().Get("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("pong")) //nolint:errcheck
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	rec := httptest.NewRecorder()
-	ws.Router().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if !called.Load() {
-		t.Error("expected custom middleware to be called")
+	srv.SetLogger(logger)
+	if srv.logger != logger {
+		t.Error("expected logger to match SetLogger")
 	}
 }
 
-func TestHealthEndpointsRegistered(t *testing.T) {
-	agg := newTestAggregator()
-	ws := NewWebServer("health-server", ":8080", WithHealthAggregator(agg))
+func TestHealthChecks(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	srv := NewHTTPServer("health-server", ":8080", handler)
 
-	endpoints := []string{
-		"/health",
-		"/health/liveness",
-		"/health/readiness",
-		"/health/startup",
+	checks := srv.HealthChecks()
+	if len(checks) != 2 {
+		t.Fatalf("expected 2 health checks, got %d", len(checks))
 	}
 
-	for _, ep := range endpoints {
-		t.Run(ep, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, ep, nil)
-			rec := httptest.NewRecorder()
-			ws.Router().ServeHTTP(rec, req)
-
-			// We just check it doesn't 404/405
-			if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
-				t.Errorf("endpoint %s returned %d, expected it to be registered", ep, rec.Code)
-			}
-		})
+	// Liveness
+	if checks[0].Name != "health-server-liveness" {
+		t.Errorf("expected liveness name 'health-server-liveness', got %q", checks[0].Name)
 	}
-}
-
-func TestLivenessEndpointReturns200(t *testing.T) {
-	agg := newTestAggregator()
-	ws := NewWebServer("liveness-server", ":8080", WithHealthAggregator(agg))
-
-	req := httptest.NewRequest(http.MethodGet, "/health/liveness", nil)
-	rec := httptest.NewRecorder()
-	ws.Router().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
+	if checks[0].Kind != healthkit.Liveness {
+		t.Error("expected liveness kind")
+	}
+	if err := checks[0].Fn(t.Context()); err != nil {
+		t.Errorf("expected liveness check to pass, got error: %v", err)
 	}
 
-	body := rec.Body.String()
-	if body != "ok" {
-		t.Errorf("expected body 'ok', got %q", body)
+	// Readiness before start
+	if checks[1].Name != "health-server-readiness" {
+		t.Errorf("expected readiness name 'health-server-readiness', got %q", checks[1].Name)
 	}
-}
-
-func TestReadinessEndpointReturns503BeforeStart(t *testing.T) {
-	agg := newTestAggregator()
-	ws := NewWebServer("readiness-server", ":8080", WithHealthAggregator(agg))
-
-	req := httptest.NewRequest(http.MethodGet, "/health/readiness", nil)
-	rec := httptest.NewRecorder()
-	ws.Router().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", rec.Code)
+	if checks[1].Kind != healthkit.Readiness {
+		t.Error("expected readiness kind")
 	}
-}
-
-func TestWithHealthAggregatorIgnoresNil(t *testing.T) {
-	agg := newTestAggregator()
-	ws := NewWebServer("nil-health-server", ":8080",
-		WithHealthAggregator(agg),
-		WithHealthAggregator(nil), // should not replace existing aggregator
-	)
-
-	if ws.Health() == nil {
-		t.Error("expected health aggregator to remain non-nil after nil override")
+	if err := checks[1].Fn(t.Context()); err == nil {
+		t.Error("expected readiness check to fail before start")
 	}
-	if ws.Health() != agg {
-		t.Error("expected health aggregator to still be the original one")
+
+	// Simulate ready
+	close(srv.readyCh)
+	if err := checks[1].Fn(t.Context()); err != nil {
+		t.Errorf("expected readiness check to pass after start, got error: %v", err)
 	}
 }
 
 func TestStartAndStop(t *testing.T) {
-	agg := newTestAggregator()
-	ws := NewWebServer("start-stop-server", "127.0.0.1:0",
-		WithHealthAggregator(agg),
-	)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok")) //nolint:errcheck
+	})
+	srv := NewHTTPServer("start-stop-server", "127.0.0.1:0", handler)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- ws.Start(ctx)
+		errCh <- srv.Start(ctx)
 	}()
 
-	// Wait for context to expire
-	<-ctx.Done()
-
-	// Verify Start returns context error
-	startErr := <-errCh
-	if startErr != context.DeadlineExceeded {
-		t.Errorf("expected context.DeadlineExceeded from Start, got %v", startErr)
+	// Wait for server to be ready
+	select {
+	case <-srv.Ready():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for server to be ready")
 	}
 
-	// Verify liveness endpoint works while server is up (before Stop)
-	resp, err := http.Get("http://" + ws.server.Addr + "/health/liveness")
-	if err == nil {
-		_, _ = io.ReadAll(resp.Body) //nolint:errcheck
-		resp.Body.Close()
+	// Test requesting the handler
+	resp, err := http.Get("http://" + srv.server.Addr)
+	if err != nil {
+		t.Fatalf("failed to make HTTP request to server: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("failed to read response: %v", err)
+	}
+	if string(body) != "ok" {
+		t.Errorf("expected 'ok', got %q", body)
 	}
 
-	// Stop should not error
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Cancel the context to stop the Start loop (simulating ApplicationRunner behavior)
+	cancel()
+
+	// Start should exit with context.Canceled error
+	select {
+	case err := <-errCh:
+		if err != context.Canceled {
+			t.Errorf("expected context.Canceled from Start, got %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("Start did not exit after context cancellation")
+	}
+
+	// Stop the server
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer stopCancel()
-	if err := ws.Stop(stopCtx); err != nil {
+	if err := srv.Stop(stopCtx); err != nil {
 		t.Errorf("expected Stop to succeed, got %v", err)
+	}
+}
+
+func TestNewDefaultHTTPServer(t *testing.T) {
+	agg := healthkit.NewAggregator(0)
+	srv := NewDefaultHTTPServer("default-srv", ":8080", agg)
+
+	if srv.Name() != "default-srv" {
+		t.Errorf("expected name 'default-srv', got %q", srv.Name())
+	}
+
+	router := srv.Router()
+	if router == nil {
+		t.Fatal("expected router to be non-nil for default server")
+	}
+
+	// Verify health routes are registered by calling the handler directly on the router
+	req := httptest.NewRequest(http.MethodGet, "/health/liveness", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK from health endpoint, got %d", rec.Code)
 	}
 }

@@ -10,15 +10,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mazzama/go-bootkit/core/healthkit"
 	"golang.org/x/sync/errgroup"
 )
 
 type ApplicationRunner struct {
-	logger          *slog.Logger
-	services        []Component
-	startDeadline   time.Duration
-	shutdownTimeout time.Duration
-	mu              sync.Mutex
+	logger           *slog.Logger
+	services         []Component
+	healthAggregator *healthkit.Aggregator
+	startDeadline    time.Duration
+	shutdownTimeout  time.Duration
+	mu               sync.Mutex
 }
 
 type Option func(*ApplicationRunner)
@@ -65,16 +67,29 @@ func WithServices(services ...Component) Option {
 	}
 }
 
+func WithHealthAggregator(agg *healthkit.Aggregator) Option {
+	return func(a *ApplicationRunner) {
+		a.healthAggregator = agg
+	}
+}
+
 func (r *ApplicationRunner) Run(ctx context.Context) error {
+	r.mu.Lock()
 	if r.logger != nil {
-		r.mu.Lock()
 		for _, s := range r.services {
 			if loggable, ok := s.(Loggable); ok {
 				loggable.SetLogger(r.logger)
 			}
 		}
-		r.mu.Unlock()
 	}
+	if r.healthAggregator != nil {
+		for _, s := range r.services {
+			if provider, ok := s.(HealthCheckProvider); ok {
+				r.healthAggregator.Register(provider.HealthChecks()...)
+			}
+		}
+	}
+	r.mu.Unlock()
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
