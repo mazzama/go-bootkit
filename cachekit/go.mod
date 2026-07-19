@@ -2,8 +2,6 @@ module github.com/mazzama/go-bootkit/cachekit
 
 go 1.26.5
 
-toolchain go1.26.5
-
 require (
 	github.com/mazzama/go-bootkit/core v0.1.3
 	github.com/redis/go-redis/v9 v9.17.2

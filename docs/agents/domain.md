@@ -4,7 +4,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 ## Before exploring, read these
 
-- **`CONTEXT-MAP.md`** at the repo root — it points at one `CONTEXT.md` per module context. Read each one relevant to the topic you are working on.
+- **`CONTEXT-MAP.md`** at the repo root — it points at one `CONTEXT.md` per module context. Read each one relevant to the topic you are working on. See [CONTEXT-MAP.md](file:///home/azzam/Documents/work/personal/go-bootkit/CONTEXT-MAP.md).
 - **`docs/adr/`** — read ADRs that touch the area you're about to work in.
 - **`<module>/docs/adr/`** (e.g. `core/docs/adr/`, `serverkit/docs/adr/`, etc.) — check for module-scoped architectural decisions.
 

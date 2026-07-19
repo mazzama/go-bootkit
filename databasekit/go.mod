@@ -2,8 +2,6 @@ module github.com/mazzama/go-bootkit/databasekit
 
 go 1.26.5
 
-toolchain go1.26.5
-
 require (
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/mazzama/go-bootkit/core v0.1.3
