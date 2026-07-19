@@ -46,7 +46,7 @@ func NewRedisCache(options ...RedisOption) *RedisCache {
 		cache.client = client
 
 		return func() {
-			cache.client.Close()
+			_ = cache.client.Close()
 		}, nil
 	})
 

@@ -16,7 +16,6 @@ type Readyable interface {
 	Ready() <-chan struct{}
 }
 
-
 type HealthCheckProvider interface {
 	HealthChecks() []healthkit.Check
 }

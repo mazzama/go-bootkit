@@ -82,11 +82,11 @@ func (a *Aggregator) Handler(kind Kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := a.evaluate(r.Context(), kind); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(err.Error())) //nolint:errcheck
+			_, _ = w.Write([]byte(err.Error()))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok")) //nolint:errcheck
+		_, _ = w.Write([]byte("ok"))
 	}
 }
 

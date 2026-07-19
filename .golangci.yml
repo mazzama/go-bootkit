@@ -1,3 +1,7 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
 linters:
   enable:
     - govet
@@ -5,15 +9,16 @@ linters:
     - errcheck
     - ineffassign
     - unused
+    - typecheck
     - gosimple
+    - goimports
+    - gofmt
+    - bodyclose
+    - gocritic
+    - nilerr
+    - makezero
+    - unconvert
+    - nolintlint
 
-linters-settings:
-  govet:
-    enable-all: true
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-
-run:
-  timeout: 5m
-  modules-download-mode: readonly
+issues:
+  exclude-use-default: false

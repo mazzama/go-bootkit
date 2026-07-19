@@ -113,7 +113,7 @@ func TestRunStartsAndStopsServices(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_ = r.Run(ctx) //nolint:errcheck
+	_ = r.Run(ctx)
 
 	if !svc.started.Load() {
 		t.Error("expected service to be started")
@@ -198,7 +198,7 @@ func TestRunLogsShutdownErrors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_ = r.Run(ctx) //nolint:errcheck
+	_ = r.Run(ctx)
 
 	logOutput := logBuf.String()
 	if !strings.Contains(logOutput, "shutdown failed") {
@@ -208,7 +208,6 @@ func TestRunLogsShutdownErrors(t *testing.T) {
 		t.Errorf("expected log output to contain 'failing-shutdown', got: %s", logOutput)
 	}
 }
-
 
 type mockHealthComponent struct {
 	mockComponent
@@ -247,7 +246,7 @@ func TestRunPropagatesHealthChecks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	_ = r.Run(ctx) //nolint:errcheck
+	_ = r.Run(ctx)
 
 	// Check if our check got registered on the aggregator
 	// We can test this by checking if evaluate finds it (i.e. running it via http handler or registry)

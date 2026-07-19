@@ -67,11 +67,11 @@ func TestHealthChecks(t *testing.T) {
 	// Simulate ready by starting it in the background
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	go func() {
 		_ = srv.Start(ctx)
 	}()
-	
+
 	select {
 	case <-srv.Ready():
 	case <-time.After(500 * time.Millisecond):
@@ -86,7 +86,7 @@ func TestHealthChecks(t *testing.T) {
 func TestStartAndStop(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok")) //nolint:errcheck
+		_, _ = w.Write([]byte("ok"))
 	})
 	srv := NewHTTPServer("start-stop-server", "127.0.0.1:0", handler)
 
@@ -111,7 +111,7 @@ func TestStartAndStop(t *testing.T) {
 		t.Fatalf("failed to make HTTP request to server: %v", err)
 	}
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		t.Fatalf("failed to read response: %v", err)
 	}

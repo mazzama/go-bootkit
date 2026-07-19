@@ -68,7 +68,7 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 
 		return func() {
 			logger.Info("Stopping HTTP server", "name", srv.name)
-			
+
 			// Context with timeout for graceful shutdown
 			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()

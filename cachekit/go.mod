@@ -1,6 +1,8 @@
 module github.com/mazzama/go-bootkit/cachekit
 
-go 1.24.6
+go 1.26.5
+
+toolchain go1.26.5
 
 require (
 	github.com/mazzama/go-bootkit/core v0.1.3

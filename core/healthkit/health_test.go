@@ -69,8 +69,6 @@ func TestStandardChecksReadinessInvokesSuppliedClosure(t *testing.T) {
 	}
 }
 
-
-
 func TestNewAggregator(t *testing.T) {
 	agg := NewAggregator(5 * time.Second)
 	if agg == nil {

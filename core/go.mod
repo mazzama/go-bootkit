@@ -1,6 +1,8 @@
 module github.com/mazzama/go-bootkit/core
 
-go 1.25.0
+go 1.26.5
+
+toolchain go1.26.5
 
 require (
 	go.opentelemetry.io/otel/trace v1.44.0
