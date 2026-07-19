@@ -13,7 +13,7 @@ A production-ready Go application framework that integrates multiple components 
 
 ## Components
 
-- **Core**: Base interfaces (`Component`), `AppRunner` for lifecycle orchestration, `healthkit` for probes, and `logger` for structured JSON.
+- **Core**: Base interfaces (`Component`), `AppRunner` for lifecycle orchestration, `Lifecycle` primitive for embeddable start/stop semantics, `healthkit` for probes (`StandardChecks`), and `logger` for structured JSON.
 - **CacheKit**: Redis cache integration using `redis/go-redis/v9`.
 - **DatabaseKit**: PostgreSQL integration using `jackc/pgx/v5` and `TxManager` for context-propagated transactions.
 - **ServerKit**: HTTP server wrapped around `go-chi/chi/v5` with panic recovery, CORS, and graceful shutdown.

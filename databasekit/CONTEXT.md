@@ -12,8 +12,7 @@ It is part of the core infrastructure layer of the application.
 - **TxProvider**: An interface extending `Querier` that provides a `Begin(ctx)` method, allowing `TxManager` to start transactions without being coupled to `pgxpool.Pool`.
 ## Architecture
 
-- `PostgresDB` is purely a lifecycle component (`Start`, `Stop`), implementing `Readyable` and `HealthCheckProvider`, and exposes the raw connection pool via `Pool()`.
+- `PostgresDB` embeds `core.Lifecycle` for robust start/stop handling, implementing `Readyable` and `HealthCheckProvider`, and exposes the raw connection pool via `Pool()`. Health checks are delegated to `healthkit.StandardChecks`.
 - `TxManager` provides `WithTx(ctx, fn)` for transaction boundaries and automatically handles nested transactions using database savepoints.
 - Context propagation is used to thread active transactions through function calls.
-- Liveness checks are lightweight no-ops to prevent pod restart storms during transient network issues.
-- Readiness checks actively ping the database backend with a timeout to temporarily stop routing traffic.
+- `healthkit.StandardChecks` is used to provide lightweight no-op liveness checks and timed backend-ping readiness checks.

@@ -11,6 +11,5 @@ It is part of the core infrastructure layer of the application.
 
 ## Architecture
 
-- Uses `core.Component` for lifecycle management (`Start`, `Stop`), and implements `Readyable` and `HealthCheckProvider`.
-- Liveness checks are lightweight no-ops to prevent pod restart storms during transient network issues.
-- Readiness checks actively ping the cache backend with a timeout to temporarily stop routing traffic.
+- `RedisCache` embeds `core.Lifecycle` for robust start/stop handling, and implements `Readyable` and `HealthCheckProvider`. Health checks are delegated to `healthkit.StandardChecks`.
+- `healthkit.StandardChecks` provides lightweight no-op liveness checks and timed backend-ping readiness checks.
