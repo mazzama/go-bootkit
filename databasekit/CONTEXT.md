@@ -9,7 +9,7 @@ It is part of the core infrastructure layer of the application.
 - **PostgresDB**: The component handling the PostgreSQL connection pool and lifecycle.
 - **TxManager**: A component that manages transactions and nested savepoints using `context.Context`.
 - **Querier**: An interface representing common query methods between `pgxpool.Pool` and `pgx.Tx`.
-
+- **TxProvider**: An interface extending `Querier` that provides a `Begin(ctx)` method, allowing `TxManager` to start transactions without being coupled to `pgxpool.Pool`.
 ## Architecture
 
 - `PostgresDB` is purely a lifecycle component (`Start`, `Stop`, `Ready`, `HealthChecks`, `SetLogger`) and exposes the raw connection pool via `Pool()`.

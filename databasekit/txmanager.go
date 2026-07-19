@@ -6,7 +6,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type txKey struct{}
@@ -18,12 +17,17 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
 }
 
-type TxManager struct {
-	pool *pgxpool.Pool
+type TxProvider interface {
+	Querier
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-func NewTxManager(pool *pgxpool.Pool) *TxManager {
-	return &TxManager{pool: pool}
+type TxManager struct {
+	provider TxProvider
+}
+
+func NewTxManager(provider TxProvider) *TxManager {
+	return &TxManager{provider: provider}
 }
 
 // TxFromContext returns the pgx.Tx from the context if it exists.
@@ -32,12 +36,12 @@ func TxFromContext(ctx context.Context) (pgx.Tx, bool) {
 	return tx, ok
 }
 
-// QuerierFromContext returns the pgx.Tx from the context if it exists, otherwise it returns the provided pool.
-func QuerierFromContext(ctx context.Context, pool *pgxpool.Pool) Querier {
+// QuerierFromContext returns the pgx.Tx from the context if it exists, otherwise it returns the configured TxProvider.
+func (tm *TxManager) QuerierFromContext(ctx context.Context) Querier {
 	if tx, ok := TxFromContext(ctx); ok {
 		return tx
 	}
-	return pool
+	return tm.provider
 }
 
 // WithTx executes the provided function within a transaction.
@@ -54,8 +58,8 @@ func (tm *TxManager) WithTx(ctx context.Context, fn func(ctx context.Context) er
 			return fmt.Errorf("failed to begin nested transaction (savepoint): %w", err)
 		}
 	} else {
-		// Begin a new transaction from the pool
-		tx, err = tm.pool.Begin(ctx)
+		// Begin a new transaction from the provider
+		tx, err = tm.provider.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to begin transaction: %w", err)
 		}
