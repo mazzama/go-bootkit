@@ -27,7 +27,7 @@ type Check struct {
 
 type cachedResult struct {
 	err error
-	at  int64
+	at  time.Time
 }
 
 type Aggregator struct {
@@ -74,8 +74,7 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 	if a.cacheTTL > 0 {
 		if v := a.cache[kind].Load(); v != nil {
 			if res, ok := v.(cachedResult); ok {
-				last := time.Unix(0, res.at)
-				if now.Sub(last) < a.cacheTTL {
+				if now.Sub(res.at) < a.cacheTTL {
 					return res.err
 				}
 			}
@@ -109,7 +108,7 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 	}
 	err := errors.Join(errs...)
 
-	a.cache[kind].Store(cachedResult{err: err, at: now.UnixNano()})
+	a.cache[kind].Store(cachedResult{err: err, at: now})
 
 	return err
 }

@@ -12,40 +12,62 @@ import (
 // TraceHandler wraps an slog.Handler to automatically inject OpenTelemetry
 // trace_id and span_id into log records when a valid span context is present.
 type TraceHandler struct {
-	inner slog.Handler
+	base slog.Handler
+	ops  []handlerOp
 }
 
-// NewTraceHandler creates a new TraceHandler wrapping the provided inner handler.
-func NewTraceHandler(inner slog.Handler) *TraceHandler {
-	return &TraceHandler{inner: inner}
+type handlerOp struct {
+	isGroup bool
+	name    string
+	attrs   []slog.Attr
+}
+
+// NewTraceHandler creates a new TraceHandler wrapping the provided base handler.
+func NewTraceHandler(base slog.Handler) *TraceHandler {
+	return &TraceHandler{base: base}
 }
 
 // Enabled delegates to the inner handler.
 func (h *TraceHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.inner.Enabled(ctx, level)
+	return h.base.Enabled(ctx, level)
 }
 
-// Handle injects trace_id and span_id attributes if a valid span context is found,
-// then delegates to the inner handler.
+// Handle injects trace_id and span_id attributes at the root of the log record
+// before applying any groups or attributes added via WithGroup/WithAttrs.
 func (h *TraceHandler) Handle(ctx context.Context, r slog.Record) error {
+	handler := h.base
+
 	spanCtx := trace.SpanContextFromContext(ctx)
 	if spanCtx.IsValid() {
-		r.AddAttrs(
+		handler = handler.WithAttrs([]slog.Attr{
 			slog.String("trace_id", spanCtx.TraceID().String()),
 			slog.String("span_id", spanCtx.SpanID().String()),
-		)
+		})
 	}
-	return h.inner.Handle(ctx, r)
+
+	for _, op := range h.ops {
+		if op.isGroup {
+			handler = handler.WithGroup(op.name)
+		} else {
+			handler = handler.WithAttrs(op.attrs)
+		}
+	}
+
+	return handler.Handle(ctx, r)
 }
 
 // WithAttrs returns a new TraceHandler with the additional attributes.
 func (h *TraceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &TraceHandler{inner: h.inner.WithAttrs(attrs)}
+	newOps := append([]handlerOp(nil), h.ops...)
+	newOps = append(newOps, handlerOp{isGroup: false, attrs: attrs})
+	return &TraceHandler{base: h.base, ops: newOps}
 }
 
 // WithGroup returns a new TraceHandler with the additional group.
 func (h *TraceHandler) WithGroup(name string) slog.Handler {
-	return &TraceHandler{inner: h.inner.WithGroup(name)}
+	newOps := append([]handlerOp(nil), h.ops...)
+	newOps = append(newOps, handlerOp{isGroup: true, name: name})
+	return &TraceHandler{base: h.base, ops: newOps}
 }
 
 type LoggerConfig struct {

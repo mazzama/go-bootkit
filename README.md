@@ -1,114 +1,124 @@
 # Go Boot Kit
 
-A production-ready Go application framework that integrates multiple components for building robust web services.
+A production-ready Go application framework that integrates multiple components for building robust web services. It enforces a strict separation of infrastructure lifecycles from application domain logic.
 
 ## Features
 
-- **Modular Architecture**: Separate modules for core functionality, caching, database, and web server
-- **Configuration Management**: Environment-based configuration with sensible defaults
-- **Health Checks**: Built-in health check endpoints for monitoring application status
-- **Middleware**: Pre-configured middleware for logging, CORS, panic recovery, and more
-- **API Structure**: Well-organized API structure with handlers and routes
-- **Docker Support**: Ready-to-use Dockerfile and docker-compose configuration
+- **Modular Architecture**: Independent modules (`core`, `cachekit`, `databasekit`, `serverkit`) that can be used together or independently.
+- **Unified Lifecycle**: `core.AppRunner` orchestrates startups, graceful shutdowns, and coordinates health checks automatically.
+- **Functional Options**: Configure components easily and safely with idiomatic functional options.
+- **Trace-Correlated Logging**: Built-in `TraceHandler` automatically injects `trace_id` and `span_id` from OpenTelemetry into JSON logs.
+- **Transaction Management**: `TxManager` handles nested database transactions seamlessly via `context.Context` and savepoints.
+- **Auto-Wired Health Checks**: Any component that exposes health checks is automatically wired to the health endpoints (`/live`, `/ready`, `/startup`).
 
 ## Components
 
-- **Core**: Base interfaces and application runner for managing component lifecycle
-- **CacheKit**: Redis cache integration
-- **DatabaseKit**: PostgreSQL database integration
-- **ServerKit**: HTTP server with Chi router and middleware
+- **Core**: Base interfaces (`Component`), `AppRunner` for lifecycle orchestration, `healthkit` for probes, and `logger` for structured JSON.
+- **CacheKit**: Redis cache integration using `redis/go-redis/v9`.
+- **DatabaseKit**: PostgreSQL integration using `jackc/pgx/v5` and `TxManager` for context-propagated transactions.
+- **ServerKit**: HTTP server wrapped around `go-chi/chi/v5` with panic recovery, CORS, and graceful shutdown.
 
-## Getting Started
+## Quick Start Example
 
-### Prerequisites
+```go
+package main
 
-- Go 1.21 or higher
-- Docker and Docker Compose (for containerized deployment)
-- PostgreSQL (for local development)
-- Redis (for local development)
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
 
-### Installation
+	"github.com/mazzama/go-bootkit/cachekit"
+	"github.com/mazzama/go-bootkit/core"
+	"github.com/mazzama/go-bootkit/databasekit"
+	"github.com/mazzama/go-bootkit/serverkit"
+)
 
-1. Clone the repository:
+func main() {
+	// 1. Setup structured trace-correlated logger
+	logger := core.NewLogger(core.LoggerConfig{
+		Level: slog.LevelInfo,
+	})
+	slog.SetDefault(logger)
 
-```bash
-git clone https://github.com/mazzama/go-bootkit.git
-cd go-bootkit
+	// 2. Initialize Infrastructure Components
+	db, err := databasekit.NewPostgresDB(
+		databasekit.WithConnString(os.Getenv("DB_CONN_STR")),
+	)
+	if err != nil {
+		slog.Error("failed to create database", "error", err)
+		os.Exit(1)
+	}
+	
+	cache, err := cachekit.NewRedisCache(
+		cachekit.WithAddress(os.Getenv("REDIS_ADDR")),
+	)
+	if err != nil {
+		slog.Error("failed to create cache", "error", err)
+		os.Exit(1)
+	}
+	
+	// Create transaction manager
+	txManager := databasekit.NewTxManager(db.Pool())
+
+	// 3. Setup HTTP Server and Routes
+	server, err := serverkit.NewHTTPServer(
+		serverkit.WithAddress(":8080"),
+	)
+	if err != nil {
+		slog.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
+
+	server.Router().Get("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	// 4. Run Application
+	runner := core.NewAppRunner(db, cache, server)
+	
+	slog.Info("starting application")
+	if err := runner.Run(context.Background()); err != nil {
+		slog.Error("application stopped", "error", err)
+		os.Exit(1)
+	}
+}
 ```
 
-2. Install dependencies:
+## Transaction Management
 
-```bash
-cd app
-go mod tidy
+The `DatabaseKit` provides a `TxManager` that allows transactions to be propagated seamlessly through the `context.Context`. This allows repositories and services to be composed without altering their signatures to accept explicit `*pgx.Tx` parameters.
+
+```go
+func (s *Service) DoComplexWork(ctx context.Context) error {
+	return s.txManager.WithTx(ctx, func(ctx context.Context) error {
+		// Both operations share the same transaction. 
+		// If WithTx is nested inside another WithTx, it creates a SAVEPOINT!
+		if err := s.repo1.Update(ctx, data); err != nil {
+			return err
+		}
+		return s.repo2.Create(ctx, log)
+	})
+}
 ```
-
-### Running Locally
-
-1. Start the required services (Redis and PostgreSQL):
-
-```bash
-docker-compose up -d redis postgres
-```
-
-2. Run the application:
-
-```bash
-cd app
-go run main.go
-```
-
-### Running with Docker
-
-Build and run the entire stack using Docker Compose:
-
-```bash
-docker-compose up --build
-```
-
-## Configuration
-
-The application is configured using environment variables. You can set these in the `.env` file for local development or in the Docker Compose file for containerized deployment.
-
-Key configuration options:
-
-- `SERVER_ADDR`: HTTP server address (default: `:8080`)
-- `REDIS_ADDR`: Redis server address (default: `localhost:6379`)
-- `DB_CONN_STR`: PostgreSQL connection string
-- `ENVIRONMENT`: Application environment (`development`, `staging`, `production`)
-- `LOG_LEVEL`: Logging level (`debug`, `info`, `warn`, `error`)
-
-See the `.env` file for a complete list of configuration options.
-
-## API Endpoints
-
-- `GET /api/status`: Returns the API status
-- `GET /api/items`: Returns a list of items
-- `POST /api/items`: Creates a new item
 
 ## Development
 
-### Project Structure
+See individual module `CONTEXT.md` files for deeper domain architecture decisions and glossaries:
+- [Core](./core/CONTEXT.md)
+- [CacheKit](./cachekit/CONTEXT.md)
+- [DatabaseKit](./databasekit/CONTEXT.md)
+- [ServerKit](./serverkit/CONTEXT.md)
 
+### Running tests
+
+```bash
+go test -v ./...
 ```
-├── app/              # Main application
-│   ├── api/          # API handlers
-│   ├── config/       # Configuration
-│   ├── middleware/   # Custom middleware
-│   └── main.go       # Application entry point
-├── cachekit/         # Redis cache integration
-├── core/             # Core interfaces and runner
-│   └── healthkit/    # Health check utilities
-├── databasekit/      # PostgreSQL database integration
-└── serverkit/        # HTTP server with Chi router
-```
-
-### Adding New Components
-
-To add a new component:
-
-1. Implement the `core.Component` interface
-2. Add the component to the application runner in `main.go`
+*(Requires a running Docker daemon for `testcontainers-go` integration tests)*
 
 ## License
 

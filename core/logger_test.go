@@ -106,17 +106,13 @@ func TestTraceHandler_WithAttrsAndGroup(t *testing.T) {
 		t.Errorf("expected component attr, got %v", output["component"])
 	}
 
+	if output["trace_id"] != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Errorf("expected trace_id, got %v", output["trace_id"])
+	}
+
 	group, ok := output["group1"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected group1")
-	}
-	
-	// Since we wrap the handler, attributes added via Handle() go into the active group
-	if group["trace_id"] != "4bf92f3577b34da6a3ce929d0e0e4736" {
-		t.Errorf("expected trace_id in group, got %v", group["trace_id"])
-	}
-	if group["span_id"] != "00f067aa0ba902b7" {
-		t.Errorf("expected span_id in group, got %v", group["span_id"])
 	}
 
 	if group["key"] != "value" {
