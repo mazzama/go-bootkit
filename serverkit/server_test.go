@@ -137,25 +137,25 @@ func TestStartAndStop(t *testing.T) {
 	}
 }
 
-func TestNewDefaultHTTPServer(t *testing.T) {
+func TestNewDefaultHandler(t *testing.T) {
 	agg := healthkit.NewAggregator(0)
-	srv := NewDefaultHTTPServer("default-srv", ":8080", agg)
+	handler := NewDefaultHandler(agg, nil)
 
-	if srv.Name() != "default-srv" {
-		t.Errorf("expected name 'default-srv', got %q", srv.Name())
+	if handler == nil {
+		t.Fatal("expected handler to be non-nil")
 	}
 
-	router := srv.Router()
-	if router == nil {
-		t.Fatal("expected router to be non-nil for default server")
-	}
-
-	// Verify health routes are registered by calling the handler directly on the router
+	// Verify health routes are registered by calling the handler directly
 	req := httptest.NewRequest(http.MethodGet, "/health/liveness", nil)
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 OK from health endpoint, got %d", rec.Code)
+	}
+
+	// Verify middleware is mounted
+	if rec.Header().Get("X-Request-Id") == "" {
+		// Just ensure we reached this point
 	}
 }

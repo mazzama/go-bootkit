@@ -21,7 +21,6 @@ type HTTPServer struct {
 	name       string
 	addr       string
 	handler    http.Handler
-	router     *chi.Mux // Nil if custom non-chi handler was passed directly
 	listener   net.Listener
 	server     *http.Server
 	readyCh    chan struct{}
@@ -54,25 +53,15 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 	return srv
 }
 
-func NewDefaultHTTPServer(name, addr string, health *healthkit.Aggregator, options ...HTTPServerOption) *HTTPServer {
+func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger) http.Handler {
 	router := chi.NewRouter()
 
-	srv := &HTTPServer{
-		name:       name,
-		addr:       addr,
-		handler:    router,
-		router:     router,
-		readyCh:    make(chan struct{}),
-		shutdownCh: make(chan struct{}),
-		logger:     slog.Default(),
+	if logger == nil {
+		logger = slog.Default()
 	}
 
-	for _, option := range options {
-		option(srv)
-	}
-
-	// Register default request logging middleware using the server's logger
-	router.Use(httplog.RequestLogger(srv.logger, &httplog.Options{
+	// Register default request logging middleware
+	router.Use(httplog.RequestLogger(logger, &httplog.Options{
 		Level:         slog.LevelInfo,
 		RecoverPanics: true,
 		Schema:        httplog.SchemaECS,
@@ -91,12 +80,7 @@ func NewDefaultHTTPServer(name, addr string, health *healthkit.Aggregator, optio
 		router.Get("/health", health.Handler(healthkit.Liveness))
 	}
 
-	srv.server = &http.Server{
-		Addr:    addr,
-		Handler: router,
-	}
-
-	return srv
+	return router
 }
 
 func WithLogger(logger *slog.Logger) HTTPServerOption {
@@ -111,10 +95,6 @@ func (s *HTTPServer) Name() string {
 
 func (s *HTTPServer) Ready() <-chan struct{} {
 	return s.readyCh
-}
-
-func (s *HTTPServer) Router() *chi.Mux {
-	return s.router
 }
 
 func (s *HTTPServer) Start(ctx context.Context) error {

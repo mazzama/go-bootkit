@@ -106,7 +106,7 @@ func NewLogger(options ...LoggerOption) *slog.Logger {
 	jsonHandler := slog.NewJSONHandler(config.Writer, &slog.HandlerOptions{
 		Level: config.Level,
 	})
-	
+
 	traceHandler := NewTraceHandler(jsonHandler)
 
 	return slog.New(traceHandler)

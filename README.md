@@ -64,18 +64,17 @@ func main() {
 	txManager := databasekit.NewTxManager(db.Pool())
 
 	// 3. Setup HTTP Server and Routes
-	server, err := serverkit.NewHTTPServer(
-		serverkit.WithAddress(":8080"),
-	)
-	if err != nil {
-		slog.Error("failed to create server", "error", err)
-		os.Exit(1)
-	}
-
-	server.Router().Get("/api/status", func(w http.ResponseWriter, r *http.Request) {
+	healthAggregator := healthkit.NewAggregator(5 * time.Second)
+	handler := serverkit.NewDefaultHandler(healthAggregator, nil)
+	
+	// Add custom routes (type assertion since we know the default is a chi router)
+	mux := handler.(*chi.Mux)
+	mux.Get("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+
+	server := serverkit.NewHTTPServer("api", ":8080", handler)
 
 	// 4. Run Application
 	runner := core.NewAppRunner(db, cache, server)
