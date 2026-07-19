@@ -13,10 +13,12 @@ import (
 type PostgresDB struct {
 	core.Lifecycle
 
-	pool    *pgxpool.Pool
-	name    string
-	connStr string
-	logger  *slog.Logger
+	pool     *pgxpool.Pool
+	name     string
+	connStr  string
+	logger   *slog.Logger
+	maxConns int32
+	minConns int32
 }
 
 type PostgresOption func(*PostgresDB)
@@ -32,9 +34,9 @@ func NewPostgresDB(options ...PostgresOption) *PostgresDB {
 	}
 
 	db.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(), error) {
-		config, errParse := pgxpool.ParseConfig(db.connStr)
-		if errParse != nil {
-			return nil, fmt.Errorf("failed to parse connection string: %w", errParse)
+		config, errConfig := db.buildPoolConfig()
+		if errConfig != nil {
+			return nil, errConfig
 		}
 
 		pool, err := pgxpool.NewWithConfig(ctx, config)
@@ -56,9 +58,55 @@ func NewPostgresDB(options ...PostgresOption) *PostgresDB {
 	return db
 }
 
+// buildPoolConfig parses the connection string and layers the sizing options on
+// top of it. Options only override the connstr-parsed values when set (> 0), so
+// pool settings carried in the connection string (e.g. pool_max_conns) are
+// preserved unless explicitly overridden.
+//
+// Pool sizing math: size MaxConns so that, across all running replicas, the
+// total does not exhaust Postgres's server-side limit:
+//
+//	replicas × MaxConns < Postgres max_connections − headroom
+//
+// Leave headroom for superuser connections, migrations, and admin tooling.
+func (db *PostgresDB) buildPoolConfig() (*pgxpool.Config, error) {
+	config, err := pgxpool.ParseConfig(db.connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse connection string: %w", err)
+	}
+
+	if db.maxConns > 0 {
+		config.MaxConns = db.maxConns
+	}
+	if db.minConns > 0 {
+		config.MinConns = db.minConns
+	}
+
+	return config, nil
+}
+
 func WithDBName(name string) PostgresOption {
 	return func(db *PostgresDB) {
 		db.name = name
+	}
+}
+
+// WithMaxConns sets the maximum number of connections in the pool. Size this
+// against Postgres's max_connections across all replicas (see buildPoolConfig).
+func WithMaxConns(n int32) PostgresOption {
+	return func(db *PostgresDB) {
+		if n > 0 {
+			db.maxConns = n
+		}
+	}
+}
+
+// WithMinConns sets the minimum number of idle connections the pool maintains.
+func WithMinConns(n int32) PostgresOption {
+	return func(db *PostgresDB) {
+		if n > 0 {
+			db.minConns = n
+		}
 	}
 }
 

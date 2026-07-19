@@ -6,6 +6,75 @@ import (
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
+func TestBuildPoolConfigDefaults(t *testing.T) {
+	db := &PostgresDB{connStr: "postgres://user:pass@localhost:5432/mydb"}
+
+	cfg, err := db.buildPoolConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// With no sizing options, pgxpool's own default MaxConns applies.
+	if cfg.MaxConns <= 0 {
+		t.Errorf("expected a positive default MaxConns, got %d", cfg.MaxConns)
+	}
+}
+
+func TestBuildPoolConfigAppliesSizingOptions(t *testing.T) {
+	db := &PostgresDB{connStr: "postgres://user:pass@localhost:5432/mydb"}
+	WithMaxConns(25)(db)
+	WithMinConns(5)(db)
+
+	cfg, err := db.buildPoolConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.MaxConns != 25 {
+		t.Errorf("expected MaxConns 25, got %d", cfg.MaxConns)
+	}
+	if cfg.MinConns != 5 {
+		t.Errorf("expected MinConns 5, got %d", cfg.MinConns)
+	}
+}
+
+func TestBuildPoolConfigPreservesConnStrPoolSettings(t *testing.T) {
+	// Sizing carried in the connection string is preserved when no option overrides it.
+	db := &PostgresDB{connStr: "postgres://user:pass@localhost:5432/mydb?pool_max_conns=17"}
+
+	cfg, err := db.buildPoolConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.MaxConns != 17 {
+		t.Errorf("expected MaxConns 17 from connstr, got %d", cfg.MaxConns)
+	}
+}
+
+func TestBuildPoolConfigOptionOverridesConnStr(t *testing.T) {
+	// An explicit option wins over the connstr-carried value.
+	db := &PostgresDB{connStr: "postgres://user:pass@localhost:5432/mydb?pool_max_conns=17"}
+	WithMaxConns(30)(db)
+
+	cfg, err := db.buildPoolConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.MaxConns != 30 {
+		t.Errorf("expected option MaxConns 30 to override connstr, got %d", cfg.MaxConns)
+	}
+}
+
+func TestBuildPoolConfigInvalidConnStr(t *testing.T) {
+	db := &PostgresDB{connStr: "://not-a-valid-dsn"}
+
+	if _, err := db.buildPoolConfig(); err == nil {
+		t.Error("expected error for invalid connection string, got nil")
+	}
+}
+
 func TestWithDBName(t *testing.T) {
 	db := &PostgresDB{name: "default"}
 	WithDBName("custom-db")(db)
