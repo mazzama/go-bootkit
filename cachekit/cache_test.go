@@ -2,7 +2,6 @@ package cachekit
 
 import (
 	"testing"
-	"time"
 
 	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/redis/go-redis/v9"
@@ -87,8 +86,8 @@ func TestHealthChecksReturnsTwoChecks(t *testing.T) {
 	if checks[0].Kind != healthkit.Liveness {
 		t.Errorf("expected Liveness kind")
 	}
-	if checks[0].Timeout != 2*time.Second {
-		t.Errorf("expected 2s timeout, got %v", checks[0].Timeout)
+	if checks[0].Timeout != 0 {
+		t.Errorf("expected 0s timeout, got %v", checks[0].Timeout)
 	}
 
 	if checks[1].Name != "test-redis-readiness" {
@@ -96,6 +95,35 @@ func TestHealthChecksReturnsTwoChecks(t *testing.T) {
 	}
 	if checks[1].Kind != healthkit.Readiness {
 		t.Errorf("expected Readiness kind")
+	}
+}
+
+func TestHealthCheckLivenessReturnsNil(t *testing.T) {
+	cache := &RedisCache{
+		name:      "test-redis",
+		readyChan: make(chan struct{}),
+	}
+
+	checks := cache.HealthChecks()
+	err := checks[0].Fn(t.Context())
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestHealthCheckReadinessReturnsErrorWhenClientNil(t *testing.T) {
+	cache := &RedisCache{
+		name:      "test-redis",
+		readyChan: make(chan struct{}),
+	}
+
+	checks := cache.HealthChecks()
+	err := checks[1].Fn(t.Context())
+	if err == nil {
+		t.Fatal("expected error when client is nil")
+	}
+	if err.Error() != "redis client is not initialized" {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

@@ -131,15 +131,10 @@ func (r *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
 func (r *RedisCache) HealthChecks() []healthkit.Check {
 	return []healthkit.Check{
 		{
-			Name:    r.name + "-liveness",
-			Kind:    healthkit.Liveness,
-			Timeout: 2 * time.Second,
+			Name: r.name + "-liveness",
+			Kind: healthkit.Liveness,
 			Fn: func(ctx context.Context) error {
-				client := r.Client()
-				if client == nil {
-					return fmt.Errorf("redis client is not initialized")
-				}
-				return client.Ping(ctx).Err()
+				return nil
 			},
 		},
 		{
@@ -147,17 +142,11 @@ func (r *RedisCache) HealthChecks() []healthkit.Check {
 			Kind:    healthkit.Readiness,
 			Timeout: 2 * time.Second,
 			Fn: func(ctx context.Context) error {
-				if r.Client() == nil {
+				client := r.Client()
+				if client == nil {
 					return fmt.Errorf("redis client is not initialized")
 				}
-				select {
-				case <-r.Ready():
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-					return fmt.Errorf("redis is not ready")
-				}
+				return client.Ping(ctx).Err()
 			},
 		},
 	}

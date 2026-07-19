@@ -2,7 +2,6 @@ package databasekit
 
 import (
 	"testing"
-	"time"
 
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
@@ -62,8 +61,8 @@ func TestHealthChecksReturnsTwoChecks(t *testing.T) {
 	if checks[0].Kind != healthkit.Liveness {
 		t.Errorf("expected Liveness kind")
 	}
-	if checks[0].Timeout != 2*time.Second {
-		t.Errorf("expected 2s timeout, got %v", checks[0].Timeout)
+	if checks[0].Timeout != 0 {
+		t.Errorf("expected 0s timeout, got %v", checks[0].Timeout)
 	}
 
 	if checks[1].Name != "test-pg-readiness" {
@@ -74,7 +73,7 @@ func TestHealthChecksReturnsTwoChecks(t *testing.T) {
 	}
 }
 
-func TestHealthCheckLivenessReturnsErrorWhenPoolNil(t *testing.T) {
+func TestHealthCheckLivenessReturnsNil(t *testing.T) {
 	db := &PostgresDB{
 		name:      "test-pg",
 		readyChan: make(chan struct{}),
@@ -82,49 +81,23 @@ func TestHealthCheckLivenessReturnsErrorWhenPoolNil(t *testing.T) {
 
 	checks := db.HealthChecks()
 	err := checks[0].Fn(t.Context())
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestHealthCheckReadinessReturnsErrorWhenPoolNil(t *testing.T) {
+	db := &PostgresDB{
+		name:      "test-pg",
+		readyChan: make(chan struct{}),
+	}
+
+	checks := db.HealthChecks()
+	err := checks[1].Fn(t.Context())
 	if err == nil {
 		t.Fatal("expected error when pool is nil")
 	}
 	if err.Error() != "db is not initialized" {
 		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestHealthCheckReadinessReturnsNotReadyBeforeStart(t *testing.T) {
-	db := &PostgresDB{
-		name:      "test-pg",
-		readyChan: make(chan struct{}),
-	}
-
-	checks := db.HealthChecks()
-	err := checks[1].Fn(t.Context())
-	if err == nil {
-		t.Fatal("expected error when not ready")
-	}
-}
-
-func TestHealthCheckReadinessChecksReadyChannel(t *testing.T) {
-	db := &PostgresDB{
-		name:      "test-pg",
-		readyChan: make(chan struct{}),
-	}
-
-	checks := db.HealthChecks()
-
-	// Before ready channel is closed, readiness should fail
-	err := checks[1].Fn(t.Context())
-	if err == nil {
-		t.Error("expected error when not ready")
-	}
-
-	// Close the ready channel to simulate readiness
-	close(db.readyChan)
-
-	// After ready channel is closed, the select statement
-	// would proceed to the pool nil check, which will error
-	// In production, pool is never nil after NewPostgresDB succeeds
-	err = checks[1].Fn(t.Context())
-	if err == nil {
-		t.Error("expected error when pool is nil")
 	}
 }
