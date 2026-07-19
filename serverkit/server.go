@@ -16,25 +16,45 @@ import (
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
+// Default HTTP server timeouts. These guard against slow clients and leaked
+// keepalive connections exhausting the server under load.
+const (
+	defaultReadHeaderTimeout = 5 * time.Second
+	defaultReadTimeout       = 15 * time.Second
+	defaultWriteTimeout      = 15 * time.Second
+	defaultIdleTimeout       = 60 * time.Second
+	defaultMaxHeaderBytes    = 1 << 20 // 1MB
+)
+
 type HTTPServer struct {
 	core.Lifecycle
 
-	name     string
-	addr     string
-	handler  http.Handler
-	listener net.Listener
-	server   *http.Server
-	logger   *slog.Logger
+	name              string
+	addr              string
+	handler           http.Handler
+	listener          net.Listener
+	server            *http.Server
+	logger            *slog.Logger
+	readHeaderTimeout time.Duration
+	readTimeout       time.Duration
+	writeTimeout      time.Duration
+	idleTimeout       time.Duration
+	maxHeaderBytes    int
 }
 
 type HTTPServerOption func(*HTTPServer)
 
 func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServerOption) *HTTPServer {
 	srv := &HTTPServer{
-		name:    name,
-		addr:    addr,
-		handler: handler,
-		logger:  slog.Default(),
+		name:              name,
+		addr:              addr,
+		handler:           handler,
+		logger:            slog.Default(),
+		readHeaderTimeout: defaultReadHeaderTimeout,
+		readTimeout:       defaultReadTimeout,
+		writeTimeout:      defaultWriteTimeout,
+		idleTimeout:       defaultIdleTimeout,
+		maxHeaderBytes:    defaultMaxHeaderBytes,
 	}
 
 	for _, option := range options {
@@ -42,8 +62,13 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 	}
 
 	srv.server = &http.Server{
-		Addr:    addr,
-		Handler: handler,
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: srv.readHeaderTimeout,
+		ReadTimeout:       srv.readTimeout,
+		WriteTimeout:      srv.writeTimeout,
+		IdleTimeout:       srv.idleTimeout,
+		MaxHeaderBytes:    srv.maxHeaderBytes,
 	}
 
 	srv.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(), error) {
@@ -117,6 +142,52 @@ func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger) http.H
 func WithLogger(logger *slog.Logger) HTTPServerOption {
 	return func(s *HTTPServer) {
 		s.logger = logger
+	}
+}
+
+// WithReadHeaderTimeout sets the maximum time allowed to read request headers.
+func WithReadHeaderTimeout(d time.Duration) HTTPServerOption {
+	return func(s *HTTPServer) {
+		if d > 0 {
+			s.readHeaderTimeout = d
+		}
+	}
+}
+
+// WithReadTimeout sets the maximum time allowed to read the entire request.
+func WithReadTimeout(d time.Duration) HTTPServerOption {
+	return func(s *HTTPServer) {
+		if d > 0 {
+			s.readTimeout = d
+		}
+	}
+}
+
+// WithWriteTimeout sets the maximum time allowed to write the response.
+func WithWriteTimeout(d time.Duration) HTTPServerOption {
+	return func(s *HTTPServer) {
+		if d > 0 {
+			s.writeTimeout = d
+		}
+	}
+}
+
+// WithIdleTimeout sets the maximum time to wait for the next request on a
+// keepalive connection.
+func WithIdleTimeout(d time.Duration) HTTPServerOption {
+	return func(s *HTTPServer) {
+		if d > 0 {
+			s.idleTimeout = d
+		}
+	}
+}
+
+// WithMaxHeaderBytes sets the maximum size of request headers.
+func WithMaxHeaderBytes(n int) HTTPServerOption {
+	return func(s *HTTPServer) {
+		if n > 0 {
+			s.maxHeaderBytes = n
+		}
 	}
 }
 

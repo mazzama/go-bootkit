@@ -33,6 +33,54 @@ func TestWithLogger(t *testing.T) {
 	}
 }
 
+func TestTimeoutDefaults(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	srv := NewHTTPServer("test-server", ":8080", handler)
+
+	if srv.server.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("expected ReadHeaderTimeout 5s, got %v", srv.server.ReadHeaderTimeout)
+	}
+	if srv.server.ReadTimeout != 15*time.Second {
+		t.Errorf("expected ReadTimeout 15s, got %v", srv.server.ReadTimeout)
+	}
+	if srv.server.WriteTimeout != 15*time.Second {
+		t.Errorf("expected WriteTimeout 15s, got %v", srv.server.WriteTimeout)
+	}
+	if srv.server.IdleTimeout != 60*time.Second {
+		t.Errorf("expected IdleTimeout 60s, got %v", srv.server.IdleTimeout)
+	}
+	if srv.server.MaxHeaderBytes != 1<<20 {
+		t.Errorf("expected MaxHeaderBytes 1MB, got %d", srv.server.MaxHeaderBytes)
+	}
+}
+
+func TestTimeoutOverrides(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	srv := NewHTTPServer("test-server", ":8080", handler,
+		WithReadHeaderTimeout(1*time.Second),
+		WithReadTimeout(2*time.Second),
+		WithWriteTimeout(3*time.Second),
+		WithIdleTimeout(4*time.Second),
+		WithMaxHeaderBytes(2048),
+	)
+
+	if srv.server.ReadHeaderTimeout != 1*time.Second {
+		t.Errorf("expected ReadHeaderTimeout 1s, got %v", srv.server.ReadHeaderTimeout)
+	}
+	if srv.server.ReadTimeout != 2*time.Second {
+		t.Errorf("expected ReadTimeout 2s, got %v", srv.server.ReadTimeout)
+	}
+	if srv.server.WriteTimeout != 3*time.Second {
+		t.Errorf("expected WriteTimeout 3s, got %v", srv.server.WriteTimeout)
+	}
+	if srv.server.IdleTimeout != 4*time.Second {
+		t.Errorf("expected IdleTimeout 4s, got %v", srv.server.IdleTimeout)
+	}
+	if srv.server.MaxHeaderBytes != 2048 {
+		t.Errorf("expected MaxHeaderBytes 2048, got %d", srv.server.MaxHeaderBytes)
+	}
+}
+
 func TestHealthChecks(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	srv := NewHTTPServer("health-server", "127.0.0.1:0", handler)
