@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/mazzama/go-bootkit/core"
@@ -13,20 +12,19 @@ import (
 )
 
 type RedisCache struct {
-	client    *redis.Client
-	options   *redis.Options
-	readyChan chan struct{}
-	name      string
-	logger    *slog.Logger
-	mu        sync.RWMutex
+	core.Lifecycle
+
+	client  *redis.Client
+	options *redis.Options
+	name    string
+	logger  *slog.Logger
 }
 
 type RedisOption func(*RedisCache)
 
 func NewRedisCache(options ...RedisOption) *RedisCache {
 	cache := &RedisCache{
-		name:      "redis-cache",
-		readyChan: make(chan struct{}),
+		name: "redis-cache",
 		options: &redis.Options{
 			Addr:     "localhost:6379",
 			Password: "",
@@ -37,6 +35,20 @@ func NewRedisCache(options ...RedisOption) *RedisCache {
 	for _, option := range options {
 		option(cache)
 	}
+
+	cache.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(), error) {
+		client := redis.NewClient(cache.options)
+
+		if err := client.Ping(ctx).Err(); err != nil {
+			return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+		}
+
+		cache.client = client
+
+		return func() {
+			cache.client.Close()
+		}, nil
+	})
 
 	return cache
 }
@@ -81,39 +93,7 @@ func (r *RedisCache) Name() string {
 	return r.name
 }
 
-func (r *RedisCache) Start(ctx context.Context) error {
-	client := redis.NewClient(r.options)
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("failed to connect to Redis: %w", err)
-	}
-
-	r.mu.Lock()
-	r.client = client
-	r.mu.Unlock()
-
-	close(r.readyChan)
-	<-ctx.Done()
-	return nil
-}
-
-func (r *RedisCache) Stop(ctx context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.client != nil {
-		return r.client.Close()
-	}
-	return nil
-}
-
-func (r *RedisCache) Ready() <-chan struct{} {
-	return r.readyChan
-}
-
 func (r *RedisCache) Client() *redis.Client {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	return r.client
 }
 
@@ -135,27 +115,13 @@ func (r *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
 }
 
 func (r *RedisCache) HealthChecks() []healthkit.Check {
-	return []healthkit.Check{
-		{
-			Name: r.name + "-liveness",
-			Kind: healthkit.Liveness,
-			Fn: func(ctx context.Context) error {
-				return nil
-			},
-		},
-		{
-			Name:    r.name + "-readiness",
-			Kind:    healthkit.Readiness,
-			Timeout: 2 * time.Second,
-			Fn: func(ctx context.Context) error {
-				client := r.Client()
-				if client == nil {
-					return fmt.Errorf("redis client is not initialized")
-				}
-				return client.Ping(ctx).Err()
-			},
-		},
-	}
+	return healthkit.StandardChecks(r.name, func(ctx context.Context) error {
+		client := r.Client()
+		if client == nil {
+			return fmt.Errorf("redis client is not initialized")
+		}
+		return client.Ping(ctx).Err()
+	})
 }
 
 var _ core.Component = (*RedisCache)(nil)
