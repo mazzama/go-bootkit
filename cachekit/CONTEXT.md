@@ -11,6 +11,6 @@ It is part of the core infrastructure layer of the application.
 
 ## Architecture
 
-- Uses `core.Component` for lifecycle management (`Start`, `Stop`, `Ready`, `HealthChecks`).
+- Uses `core.Component` for lifecycle management (`Start`, `Stop`), and implements `Readyable` and `HealthCheckProvider`.
 - Liveness checks are lightweight no-ops to prevent pod restart storms during transient network issues.
 - Readiness checks actively ping the cache backend with a timeout to temporarily stop routing traffic.

@@ -44,28 +44,22 @@ func main() {
 	slog.SetDefault(logger)
 
 	// 2. Initialize Infrastructure Components
-	db, err := databasekit.NewPostgresDB(
+	db := databasekit.NewPostgresDB(
 		databasekit.WithConnString(os.Getenv("DB_CONN_STR")),
+		databasekit.WithLogger(logger),
 	)
-	if err != nil {
-		slog.Error("failed to create database", "error", err)
-		os.Exit(1)
-	}
 	
-	cache, err := cachekit.NewRedisCache(
+	cache := cachekit.NewRedisCache(
 		cachekit.WithAddress(os.Getenv("REDIS_ADDR")),
+		cachekit.WithLogger(logger),
 	)
-	if err != nil {
-		slog.Error("failed to create cache", "error", err)
-		os.Exit(1)
-	}
 	
 	// Create transaction manager
 	txManager := databasekit.NewTxManager(db.Pool())
 
 	// 3. Setup HTTP Server and Routes
 	healthAggregator := healthkit.NewAggregator(5 * time.Second)
-	handler := serverkit.NewDefaultHandler(healthAggregator, nil)
+	handler := serverkit.NewDefaultHandler(healthAggregator, logger)
 	
 	// Add custom routes (type assertion since we know the default is a chi router)
 	mux := handler.(*chi.Mux)
@@ -74,10 +68,14 @@ func main() {
 		w.Write([]byte("ok"))
 	})
 
-	server := serverkit.NewHTTPServer("api", ":8080", handler)
+	server := serverkit.NewHTTPServer("api", ":8080", handler, serverkit.WithLogger(logger))
 
 	// 4. Run Application
-	runner := core.NewAppRunner(db, cache, server)
+	runner := core.NewApplicationRunner(
+		core.WithLogger(logger),
+		core.WithHealthAggregator(healthAggregator),
+		core.WithServices(db, cache, server),
+	)
 	
 	slog.Info("starting application")
 	if err := runner.Run(context.Background()); err != nil {
