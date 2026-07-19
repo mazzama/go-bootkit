@@ -11,6 +11,66 @@ import (
 	"time"
 )
 
+func TestStandardChecksShape(t *testing.T) {
+	checks := StandardChecks("test-db", func(ctx context.Context) error {
+		return nil
+	})
+
+	if len(checks) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(checks))
+	}
+
+	if checks[0].Name != "test-db-liveness" {
+		t.Errorf("expected 'test-db-liveness', got %q", checks[0].Name)
+	}
+	if checks[0].Kind != Liveness {
+		t.Errorf("expected Liveness kind for check[0]")
+	}
+	if checks[0].Timeout != 0 {
+		t.Errorf("expected liveness Timeout=0, got %v", checks[0].Timeout)
+	}
+
+	if checks[1].Name != "test-db-readiness" {
+		t.Errorf("expected 'test-db-readiness', got %q", checks[1].Name)
+	}
+	if checks[1].Kind != Readiness {
+		t.Errorf("expected Readiness kind for check[1]")
+	}
+	if checks[1].Timeout != 2*time.Second {
+		t.Errorf("expected readiness Timeout=2s, got %v", checks[1].Timeout)
+	}
+}
+
+func TestStandardChecksLivenessIsNop(t *testing.T) {
+	checks := StandardChecks("svc", func(ctx context.Context) error {
+		return errors.New("readiness should not be invoked here")
+	})
+
+	if err := checks[0].Fn(context.Background()); err != nil {
+		t.Fatalf("expected nop liveness to return nil, got %v", err)
+	}
+}
+
+func TestStandardChecksReadinessInvokesSuppliedClosure(t *testing.T) {
+	var called atomic.Bool
+	sentinel := errors.New("backend down")
+
+	checks := StandardChecks("svc", func(ctx context.Context) error {
+		called.Store(true)
+		return sentinel
+	})
+
+	err := checks[1].Fn(context.Background())
+	if !called.Load() {
+		t.Fatal("expected readiness closure to be invoked")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected readiness closure error to propagate, got %v", err)
+	}
+}
+
+
+
 func TestNewAggregator(t *testing.T) {
 	agg := NewAggregator(5 * time.Second)
 	if agg == nil {

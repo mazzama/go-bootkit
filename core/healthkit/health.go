@@ -37,6 +37,28 @@ type Aggregator struct {
 	mu       sync.RWMutex
 }
 
+// StandardChecks returns the standard liveness/readiness pair shared by
+// infrastructure components. The liveness check is a no-op (it exists to keep
+// pod restart storms at bay during transient backend issues); the readiness
+// actively reflects backend availability. Callers supply only the readiness closure.
+func StandardChecks(name string, readyFn func(ctx context.Context) error) []Check {
+	return []Check{
+		{
+			Name: name + "-liveness",
+			Kind: Liveness,
+			Fn: func(ctx context.Context) error {
+				return nil
+			},
+		},
+		{
+			Name:    name + "-readiness",
+			Kind:    Readiness,
+			Timeout: 2 * time.Second,
+			Fn:      readyFn,
+		},
+	}
+}
+
 func NewAggregator(cacheTTL time.Duration) *Aggregator {
 	return &Aggregator{
 		checks:   make(map[Kind][]Check),
