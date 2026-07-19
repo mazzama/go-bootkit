@@ -75,9 +75,6 @@ func WithHealthAggregator(agg *healthkit.Aggregator) Option {
 
 func (r *ApplicationRunner) Run(ctx context.Context) error {
 	r.mu.Lock()
-	if r.logger != nil {
-		// Nothing to propagate
-	}
 	if r.healthAggregator != nil {
 		for _, s := range r.services {
 			if provider, ok := s.(HealthCheckProvider); ok {
