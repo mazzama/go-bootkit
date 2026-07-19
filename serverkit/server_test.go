@@ -33,10 +33,9 @@ func TestWithLogger(t *testing.T) {
 	}
 }
 
-
 func TestHealthChecks(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	srv := NewHTTPServer("health-server", ":8080", handler)
+	srv := NewHTTPServer("health-server", "127.0.0.1:0", handler)
 
 	checks := srv.HealthChecks()
 	if len(checks) != 2 {
@@ -65,8 +64,20 @@ func TestHealthChecks(t *testing.T) {
 		t.Error("expected readiness check to fail before start")
 	}
 
-	// Simulate ready
-	close(srv.readyCh)
+	// Simulate ready by starting it in the background
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+	
+	select {
+	case <-srv.Ready():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for server to be ready")
+	}
+
 	if err := checks[1].Fn(t.Context()); err != nil {
 		t.Errorf("expected readiness check to pass after start, got error: %v", err)
 	}

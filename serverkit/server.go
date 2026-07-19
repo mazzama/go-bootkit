@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,27 +17,24 @@ import (
 )
 
 type HTTPServer struct {
-	name       string
-	addr       string
-	handler    http.Handler
-	listener   net.Listener
-	server     *http.Server
-	readyCh    chan struct{}
-	shutdownCh chan struct{}
-	logger     *slog.Logger
-	mu         sync.RWMutex
+	core.Lifecycle
+
+	name     string
+	addr     string
+	handler  http.Handler
+	listener net.Listener
+	server   *http.Server
+	logger   *slog.Logger
 }
 
 type HTTPServerOption func(*HTTPServer)
 
 func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServerOption) *HTTPServer {
 	srv := &HTTPServer{
-		name:       name,
-		addr:       addr,
-		handler:    handler,
-		readyCh:    make(chan struct{}),
-		shutdownCh: make(chan struct{}),
-		logger:     slog.Default(),
+		name:    name,
+		addr:    addr,
+		handler: handler,
+		logger:  slog.Default(),
 	}
 
 	for _, option := range options {
@@ -49,6 +45,41 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 		Addr:    addr,
 		Handler: handler,
 	}
+
+	srv.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(), error) {
+		logger := srv.logger
+
+		logger.Info("Starting HTTP server", "name", srv.name, "addr", srv.addr)
+
+		listener, err := net.Listen("tcp", srv.addr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create listener: %w", err)
+		}
+		srv.listener = listener
+		srv.server.Addr = listener.Addr().String()
+
+		go func() {
+			if err := srv.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("HTTP server error", "name", srv.name, "error", err)
+			}
+		}()
+
+		logger.Info("HTTP server ready", "name", srv.name, "addr", srv.server.Addr)
+
+		return func() {
+			logger.Info("Stopping HTTP server", "name", srv.name)
+			
+			// Context with timeout for graceful shutdown
+			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+
+			if err := srv.server.Shutdown(stopCtx); err != nil {
+				logger.Error("Error shutting down HTTP server", "name", srv.name, "error", err)
+			} else {
+				logger.Info("HTTP server stopped", "name", srv.name)
+			}
+		}, nil
+	})
 
 	return srv
 }
@@ -93,80 +124,15 @@ func (s *HTTPServer) Name() string {
 	return s.name
 }
 
-func (s *HTTPServer) Ready() <-chan struct{} {
-	return s.readyCh
-}
-
-func (s *HTTPServer) Start(ctx context.Context) error {
-	s.mu.RLock()
-	logger := s.logger
-	s.mu.RUnlock()
-
-	logger.Info("Starting HTTP server", "name", s.name, "addr", s.addr)
-
-	listener, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return fmt.Errorf("failed to create listener: %w", err)
-	}
-	s.listener = listener
-
-	// Update the actual address in case a random port (:0) was used
-	s.server.Addr = listener.Addr().String()
-
-	go func() {
-		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("HTTP server error", "name", s.name, "error", err)
-		}
-	}()
-
-	close(s.readyCh)
-	logger.Info("HTTP server ready", "name", s.name, "addr", s.server.Addr)
-
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-func (s *HTTPServer) Stop(ctx context.Context) error {
-	s.mu.RLock()
-	logger := s.logger
-	s.mu.RUnlock()
-
-	logger.Info("Stopping HTTP server", "name", s.name)
-
-	if err := s.server.Shutdown(ctx); err != nil {
-		logger.Error("Error shutting down HTTP server", "name", s.name, "error", err)
-		return err
-	}
-
-	close(s.shutdownCh)
-	logger.Info("HTTP server stopped", "name", s.name)
-	return nil
-}
-
-
-
 func (s *HTTPServer) HealthChecks() []healthkit.Check {
-	return []healthkit.Check{
-		{
-			Name: s.name + "-liveness",
-			Kind: healthkit.Liveness,
-			Fn: func(ctx context.Context) error {
-				return nil
-			},
-		},
-		{
-			Name: s.name + "-readiness",
-			Kind: healthkit.Readiness,
-			Fn: func(ctx context.Context) error {
-				select {
-				case <-s.readyCh:
-					return nil
-				default:
-					return fmt.Errorf("server not ready")
-				}
-			},
-		},
-	}
+	return healthkit.StandardChecks(s.name, func(ctx context.Context) error {
+		select {
+		case <-s.Ready():
+			return nil
+		default:
+			return fmt.Errorf("server not ready")
+		}
+	})
 }
 
 var _ core.Component = (*HTTPServer)(nil)
