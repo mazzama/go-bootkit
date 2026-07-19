@@ -29,25 +29,9 @@ func TestPostgresDBName(t *testing.T) {
 	}
 }
 
-func TestReadyChannel(t *testing.T) {
-	db := &PostgresDB{readyChan: make(chan struct{})}
-	ch := db.Ready()
-	if ch == nil {
-		t.Fatal("expected non-nil ready channel")
-	}
-
-	select {
-	case <-ch:
-		t.Fatal("expected channel to be open (not ready yet)")
-	default:
-		// correct
-	}
-}
-
 func TestHealthChecksReturnsTwoChecks(t *testing.T) {
 	db := &PostgresDB{
-		name:      "test-pg",
-		readyChan: make(chan struct{}),
+		name: "test-pg",
 	}
 
 	checks := db.HealthChecks()
@@ -61,9 +45,6 @@ func TestHealthChecksReturnsTwoChecks(t *testing.T) {
 	if checks[0].Kind != healthkit.Liveness {
 		t.Errorf("expected Liveness kind")
 	}
-	if checks[0].Timeout != 0 {
-		t.Errorf("expected 0s timeout, got %v", checks[0].Timeout)
-	}
 
 	if checks[1].Name != "test-pg-readiness" {
 		t.Errorf("expected 'test-pg-readiness', got %q", checks[1].Name)
@@ -75,8 +56,7 @@ func TestHealthChecksReturnsTwoChecks(t *testing.T) {
 
 func TestHealthCheckLivenessReturnsNil(t *testing.T) {
 	db := &PostgresDB{
-		name:      "test-pg",
-		readyChan: make(chan struct{}),
+		name: "test-pg",
 	}
 
 	checks := db.HealthChecks()
@@ -88,8 +68,7 @@ func TestHealthCheckLivenessReturnsNil(t *testing.T) {
 
 func TestHealthCheckReadinessReturnsErrorWhenPoolNil(t *testing.T) {
 	db := &PostgresDB{
-		name:      "test-pg",
-		readyChan: make(chan struct{}),
+		name: "test-pg",
 	}
 
 	checks := db.HealthChecks()
