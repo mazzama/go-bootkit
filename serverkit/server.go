@@ -153,12 +153,6 @@ func (s *HTTPServer) Stop(ctx context.Context) error {
 
 	logger.Info("Stopping HTTP server", "name", s.name)
 
-	if s.listener != nil {
-		if err := s.listener.Close(); err != nil {
-			logger.Error("Error closing listener", "name", s.name, "error", err)
-		}
-	}
-
 	if err := s.server.Shutdown(ctx); err != nil {
 		logger.Error("Error shutting down HTTP server", "name", s.name, "error", err)
 		return err
