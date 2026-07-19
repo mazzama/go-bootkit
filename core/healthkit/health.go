@@ -59,7 +59,25 @@ func StandardChecks(name string, readyFn func(ctx context.Context) error) []Chec
 	}
 }
 
+// defaultCacheTTLFloor is applied when NewAggregator is called with 0, so that
+// concurrent liveness/readiness/startup probes against the same backend collapse
+// onto a single cached result rather than each running a live check.
+const defaultCacheTTLFloor = 1 * time.Second
+
+// NewAggregator creates a health check aggregator with the given cache TTL.
+//
+// A cacheTTL of 0 applies a safe 1s floor (defaultCacheTTLFloor) to keep probes
+// from hammering backends under load. A negative cacheTTL (e.g. -1) opts out of
+// caching entirely, so every probe evaluates live. Positive values are honored
+// unchanged.
 func NewAggregator(cacheTTL time.Duration) *Aggregator {
+	switch {
+	case cacheTTL == 0:
+		cacheTTL = defaultCacheTTLFloor
+	case cacheTTL < 0:
+		cacheTTL = 0
+	}
+
 	return &Aggregator{
 		checks:   make(map[Kind][]Check),
 		cacheTTL: cacheTTL,

@@ -79,6 +79,51 @@ func TestNewAggregator(t *testing.T) {
 	}
 }
 
+func TestNewAggregatorZeroAppliesFloor(t *testing.T) {
+	agg := NewAggregator(0)
+	if agg.cacheTTL != 1*time.Second {
+		t.Fatalf("expected 0 to apply a 1s floor, got %v", agg.cacheTTL)
+	}
+}
+
+func TestNewAggregatorNegativeDisablesCache(t *testing.T) {
+	agg := NewAggregator(-1)
+	if agg.cacheTTL != 0 {
+		t.Fatalf("expected negative TTL to disable caching (0), got %v", agg.cacheTTL)
+	}
+}
+
+func TestNewAggregatorPositiveHonored(t *testing.T) {
+	agg := NewAggregator(250 * time.Millisecond)
+	if agg.cacheTTL != 250*time.Millisecond {
+		t.Fatalf("expected positive TTL honored unchanged, got %v", agg.cacheTTL)
+	}
+}
+
+func TestNewAggregatorNegativeEvaluatesLive(t *testing.T) {
+	var callCount int32
+	agg := NewAggregator(-1)
+	agg.Register(Check{
+		Name: "live-check",
+		Kind: Liveness,
+		Fn: func(ctx context.Context) error {
+			atomic.AddInt32(&callCount, 1)
+			return nil
+		},
+	})
+
+	handler := agg.Handler(Liveness)
+	for range 3 {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		handler.ServeHTTP(rec, req)
+	}
+
+	if count := atomic.LoadInt32(&callCount); count != 3 {
+		t.Fatalf("expected Fn called live on every probe (3), got %d", count)
+	}
+}
+
 func TestRegisterSetsDefaultTimeout(t *testing.T) {
 	agg := NewAggregator(0)
 	agg.Register(Check{
