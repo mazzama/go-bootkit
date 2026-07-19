@@ -1,5 +1,7 @@
 # Go Boot Kit
 
+[![codecov](https://codecov.io/github/mazzama/go-bootkit/branch/master/graph/badge.svg?token=GNL2NI4D17)](https://codecov.io/github/mazzama/go-bootkit)
+
 A production-ready Go application framework that integrates multiple components for building robust web services. It enforces a strict separation of infrastructure lifecycles from application domain logic.
 
 ## Features
