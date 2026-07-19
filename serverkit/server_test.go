@@ -153,9 +153,4 @@ func TestNewDefaultHandler(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 OK from health endpoint, got %d", rec.Code)
 	}
-
-	// Verify middleware is mounted
-	if rec.Header().Get("X-Request-Id") == "" {
-		// Just ensure we reached this point
-	}
 }
