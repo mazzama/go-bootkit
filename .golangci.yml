@@ -23,5 +23,4 @@ formatters:
     - goimports
     - gofmt
 
-issues:
-  exclude-use-default: false
+
