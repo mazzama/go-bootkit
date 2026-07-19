@@ -3,6 +3,7 @@ package healthkit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -26,12 +27,12 @@ type Check struct {
 
 type cachedResult struct {
 	err error
+	at  int64
 }
 
 type Aggregator struct {
-	cacheErr [3]atomic.Value
+	cache    [3]atomic.Value
 	checks   map[Kind][]Check
-	cacheAt  [3]int64
 	cacheTTL time.Duration
 	mu       sync.RWMutex
 }
@@ -69,12 +70,14 @@ func (a *Aggregator) Handler(kind Kind) http.HandlerFunc {
 
 func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 	now := time.Now()
-	last := time.Unix(0, atomic.LoadInt64(&a.cacheAt[kind]))
 
-	if a.cacheTTL > 0 && now.Sub(last) < a.cacheTTL {
-		if v := a.cacheErr[kind].Load(); v != nil {
+	if a.cacheTTL > 0 {
+		if v := a.cache[kind].Load(); v != nil {
 			if res, ok := v.(cachedResult); ok {
-				return res.err
+				last := time.Unix(0, res.at)
+				if now.Sub(last) < a.cacheTTL {
+					return res.err
+				}
 			}
 		}
 	}
@@ -93,7 +96,7 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 			ctxTimeout, cancel := context.WithTimeout(ctx, check.Timeout)
 			defer cancel()
 			if err := check.Fn(ctxTimeout); err != nil {
-				errCh <- errors.New(check.Name + ": " + err.Error())
+				errCh <- fmt.Errorf("%s: %w", check.Name, err)
 			}
 		}()
 	}
@@ -106,9 +109,7 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 	}
 	err := errors.Join(errs...)
 
-	a.cacheErr[kind].Store(cachedResult{err: err})
-
-	atomic.StoreInt64(&a.cacheAt[kind], now.UnixNano())
+	a.cache[kind].Store(cachedResult{err: err, at: now.UnixNano()})
 
 	return err
 }

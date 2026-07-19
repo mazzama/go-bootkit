@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
@@ -96,26 +95,6 @@ func (db *PostgresDB) Pool() *pgxpool.Pool {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	return db.pool
-}
-
-func (db *PostgresDB) Exec(ctx context.Context, sql string, args ...interface{}) (int64, error) {
-	result, err := db.Pool().Exec(ctx, sql, args...)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-func (db *PostgresDB) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return db.Pool().Query(ctx, sql, args...)
-}
-
-func (db *PostgresDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return db.Pool().QueryRow(ctx, sql, args...)
-}
-
-func (db *PostgresDB) Begin(ctx context.Context) (pgx.Tx, error) {
-	return db.Pool().Begin(ctx)
 }
 
 func (db *PostgresDB) HealthChecks() []healthkit.Check {
