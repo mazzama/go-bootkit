@@ -47,6 +47,12 @@ func WithName(name string) RedisOption {
 	}
 }
 
+func WithLogger(logger *slog.Logger) RedisOption {
+	return func(r *RedisCache) {
+		r.logger = logger
+	}
+}
+
 func WithAddress(addr string) RedisOption {
 	return func(r *RedisCache) {
 		r.options.Addr = addr
@@ -152,12 +158,5 @@ func (r *RedisCache) HealthChecks() []healthkit.Check {
 	}
 }
 
-func (r *RedisCache) SetLogger(logger *slog.Logger) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.logger = logger
-}
-
 var _ core.Component = (*RedisCache)(nil)
 var _ core.Readyable = (*RedisCache)(nil)
-var _ core.Loggable = (*RedisCache)(nil)

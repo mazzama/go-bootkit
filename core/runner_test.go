@@ -209,48 +209,6 @@ func TestRunLogsShutdownErrors(t *testing.T) {
 	}
 }
 
-type mockLoggableComponent struct {
-	mockComponent
-	logger *slog.Logger
-}
-
-func (m *mockLoggableComponent) SetLogger(l *slog.Logger) {
-	m.logger = l
-}
-
-func TestRunPropagatesLogger(t *testing.T) {
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-
-	readyCh := make(chan struct{})
-	svc := &mockLoggableComponent{
-		mockComponent: mockComponent{
-			name:    "loggable-svc",
-			readyCh: readyCh,
-			startFn: func(ctx context.Context) error {
-				close(readyCh)
-				<-ctx.Done()
-				return nil
-			},
-		},
-	}
-
-	r := NewApplicationRunner(
-		WithServices(svc),
-		WithLogger(logger),
-	)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	_ = r.Run(ctx) //nolint:errcheck
-
-	if svc.logger == nil {
-		t.Error("expected logger to be propagated to component")
-	} else if svc.logger != logger {
-		t.Error("expected propagated logger to match the runner's logger")
-	}
-}
 
 type mockHealthComponent struct {
 	mockComponent

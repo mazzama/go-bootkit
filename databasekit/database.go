@@ -43,6 +43,12 @@ func WithDBName(name string) PostgresOption {
 	}
 }
 
+func WithLogger(logger *slog.Logger) PostgresOption {
+	return func(db *PostgresDB) {
+		db.logger = logger
+	}
+}
+
 func WithConnectionString(connStr string) PostgresOption {
 	return func(db *PostgresDB) {
 		db.connStr = connStr
@@ -121,12 +127,5 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 	}
 }
 
-func (db *PostgresDB) SetLogger(logger *slog.Logger) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	db.logger = logger
-}
-
 var _ core.Component = (*PostgresDB)(nil)
 var _ core.Readyable = (*PostgresDB)(nil)
-var _ core.Loggable = (*PostgresDB)(nil)

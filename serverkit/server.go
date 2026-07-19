@@ -143,13 +143,7 @@ func (s *HTTPServer) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (s *HTTPServer) SetLogger(logger *slog.Logger) {
-	if logger != nil {
-		s.mu.Lock()
-		s.logger = logger
-		s.mu.Unlock()
-	}
-}
+
 
 func (s *HTTPServer) HealthChecks() []healthkit.Check {
 	return []healthkit.Check{
@@ -177,4 +171,3 @@ func (s *HTTPServer) HealthChecks() []healthkit.Check {
 
 var _ core.Component = (*HTTPServer)(nil)
 var _ core.Readyable = (*HTTPServer)(nil)
-var _ core.Loggable = (*HTTPServer)(nil)

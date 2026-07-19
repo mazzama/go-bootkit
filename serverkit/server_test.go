@@ -1,11 +1,13 @@
 package serverkit
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,16 +33,6 @@ func TestWithLogger(t *testing.T) {
 	}
 }
 
-func TestSetLogger(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	srv := NewHTTPServer("test-server", ":8080", handler)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	srv.SetLogger(logger)
-	if srv.logger != logger {
-		t.Error("expected logger to match SetLogger")
-	}
-}
 
 func TestHealthChecks(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
@@ -138,8 +130,10 @@ func TestStartAndStop(t *testing.T) {
 }
 
 func TestNewDefaultHandler(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	agg := healthkit.NewAggregator(0)
-	handler := NewDefaultHandler(agg, nil)
+	handler := NewDefaultHandler(agg, logger)
 
 	if handler == nil {
 		t.Fatal("expected handler to be non-nil")
@@ -152,5 +146,10 @@ func TestNewDefaultHandler(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 OK from health endpoint, got %d", rec.Code)
+	}
+
+	// Verify the injected logger was used by httplog middleware
+	if !strings.Contains(buf.String(), "/health/liveness") {
+		t.Errorf("expected injected logger to capture the request, got: %s", buf.String())
 	}
 }
