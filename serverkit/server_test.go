@@ -16,7 +16,7 @@ import (
 
 func TestNewHTTPServer(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	srv := NewHTTPServer("test-server", ":8080", handler)
+	srv, _ := NewHTTPServer("test-server", ":8080", handler)
 
 	if srv.Name() != "test-server" {
 		t.Errorf("expected name 'test-server', got %q", srv.Name())
@@ -26,7 +26,7 @@ func TestNewHTTPServer(t *testing.T) {
 func TestWithLogger(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewHTTPServer("test-server", ":8080", handler, WithLogger(logger))
+	srv, _ := NewHTTPServer("test-server", ":8080", handler, WithLogger(logger))
 
 	if srv.logger != logger {
 		t.Error("expected logger to match WithLogger option")
@@ -35,7 +35,7 @@ func TestWithLogger(t *testing.T) {
 
 func TestTimeoutDefaults(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	srv := NewHTTPServer("test-server", ":8080", handler)
+	srv, _ := NewHTTPServer("test-server", ":8080", handler)
 
 	if srv.server.ReadHeaderTimeout != 5*time.Second {
 		t.Errorf("expected ReadHeaderTimeout 5s, got %v", srv.server.ReadHeaderTimeout)
@@ -56,7 +56,7 @@ func TestTimeoutDefaults(t *testing.T) {
 
 func TestTimeoutOverrides(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	srv := NewHTTPServer("test-server", ":8080", handler,
+	srv, _ := NewHTTPServer("test-server", ":8080", handler,
 		WithReadHeaderTimeout(1*time.Second),
 		WithReadTimeout(2*time.Second),
 		WithWriteTimeout(3*time.Second),
@@ -83,7 +83,7 @@ func TestTimeoutOverrides(t *testing.T) {
 
 func TestHealthChecks(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	srv := NewHTTPServer("health-server", "127.0.0.1:0", handler)
+	srv, _ := NewHTTPServer("health-server", "127.0.0.1:0", handler)
 
 	checks := srv.HealthChecks()
 	if len(checks) != 2 {
@@ -136,7 +136,7 @@ func TestStartAndStop(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	srv := NewHTTPServer("start-stop-server", "127.0.0.1:0", handler)
+	srv, _ := NewHTTPServer("start-stop-server", "127.0.0.1:0", handler)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -210,5 +210,44 @@ func TestNewDefaultHandler(t *testing.T) {
 	// Verify the injected logger was used by httplog middleware
 	if !strings.Contains(buf.String(), "/health/liveness") {
 		t.Errorf("expected injected logger to capture the request, got: %s", buf.String())
+	}
+}
+
+func TestNewHTTPServerValidation(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+
+	tests := []struct {
+		name    string
+		addr    string
+		handler http.Handler
+		wantErr bool
+	}{
+		{
+			name:    "valid",
+			addr:    ":8080",
+			handler: handler,
+			wantErr: false,
+		},
+		{
+			name:    "empty addr",
+			addr:    "",
+			handler: handler,
+			wantErr: true,
+		},
+		{
+			name:    "nil handler",
+			addr:    ":8080",
+			handler: nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewHTTPServer("test", tt.addr, tt.handler)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewHTTPServer() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

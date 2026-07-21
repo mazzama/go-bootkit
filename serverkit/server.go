@@ -44,7 +44,14 @@ type HTTPServer struct {
 
 type HTTPServerOption func(*HTTPServer)
 
-func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServerOption) *HTTPServer {
+func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServerOption) (*HTTPServer, error) {
+	if addr == "" {
+		return nil, errors.New("http server address cannot be empty")
+	}
+	if handler == nil {
+		return nil, errors.New("http server handler cannot be nil")
+	}
+
 	srv := &HTTPServer{
 		name:              name,
 		addr:              addr,
@@ -104,7 +111,7 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 		}, nil
 	})
 
-	return srv
+	return srv, nil
 }
 
 func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger) http.Handler {
