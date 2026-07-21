@@ -33,7 +33,7 @@ func NewPostgresDB(options ...PostgresOption) *PostgresDB {
 		option(db)
 	}
 
-	db.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(), error) {
+	db.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
 		config, errConfig := db.buildPoolConfig()
 		if errConfig != nil {
 			return nil, errConfig
@@ -50,8 +50,9 @@ func NewPostgresDB(options ...PostgresOption) *PostgresDB {
 
 		db.pool = pool
 
-		return func() {
+		return func(_ context.Context) error {
 			db.pool.Close()
+			return nil
 		}, nil
 	})
 
