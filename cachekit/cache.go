@@ -36,7 +36,7 @@ func NewRedisCache(options ...RedisOption) *RedisCache {
 		option(cache)
 	}
 
-	cache.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(), error) {
+	cache.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
 		client := redis.NewClient(cache.options)
 
 		if err := client.Ping(ctx).Err(); err != nil {
@@ -45,8 +45,8 @@ func NewRedisCache(options ...RedisOption) *RedisCache {
 
 		cache.client = client
 
-		return func() {
-			_ = cache.client.Close()
+		return func(_ context.Context) error {
+			return cache.client.Close()
 		}, nil
 	})
 
