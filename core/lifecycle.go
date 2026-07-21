@@ -11,18 +11,20 @@ import (
 type Lifecycle struct {
 	// Connect is called by Start to acquire the resource. It should return a
 	// stop closure to release the resource, and an error if connection fails.
-	Connect func(ctx context.Context) (stop func(), err error)
+	// The stop closure receives the shutdown context so it can respect the
+	// caller's deadline, and returns an error if resource release fails.
+	Connect func(ctx context.Context) (stop func(ctx context.Context) error, err error)
 
 	mu        sync.Mutex
 	ready     chan struct{}
 	readyOnce sync.Once
-	stopFunc  func()
+	stopFunc  func(context.Context) error
 	stopped   bool
 }
 
 // NewLifecycle creates a new Lifecycle with the provided connect function.
 // It is returned as a value to be easily embedded in other structs.
-func NewLifecycle(connect func(ctx context.Context) (func(), error)) Lifecycle {
+func NewLifecycle(connect func(ctx context.Context) (func(context.Context) error, error)) Lifecycle {
 	return Lifecycle{
 		Connect: connect,
 	}
@@ -52,7 +54,7 @@ func (l *Lifecycle) Start(ctx context.Context) error {
 	if l.stopped {
 		l.mu.Unlock()
 		if stop != nil {
-			stop()
+			return stop(ctx)
 		}
 		return nil
 	}
@@ -66,8 +68,10 @@ func (l *Lifecycle) Start(ctx context.Context) error {
 }
 
 // Stop invokes the stop closure returned by Connect at most once.
+// It forwards the provided context to the stop closure so the closure
+// can respect the caller's shutdown deadline. It returns the closure's error.
 // It is safe to call on a never-started or half-started instance.
-func (l *Lifecycle) Stop(_ context.Context) error {
+func (l *Lifecycle) Stop(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -77,7 +81,7 @@ func (l *Lifecycle) Stop(_ context.Context) error {
 	l.stopped = true
 
 	if l.stopFunc != nil {
-		l.stopFunc()
+		return l.stopFunc(ctx)
 	}
 	return nil
 }
