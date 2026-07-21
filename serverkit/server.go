@@ -71,7 +71,7 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 		MaxHeaderBytes:    srv.maxHeaderBytes,
 	}
 
-	srv.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(), error) {
+	srv.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
 		logger := srv.logger
 
 		logger.Info("Starting HTTP server", "name", srv.name, "addr", srv.addr)
@@ -91,18 +91,16 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 
 		logger.Info("HTTP server ready", "name", srv.name, "addr", srv.server.Addr)
 
-		return func() {
+		return func(stopCtx context.Context) error {
 			logger.Info("Stopping HTTP server", "name", srv.name)
-
-			// Context with timeout for graceful shutdown
-			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
 
 			if err := srv.server.Shutdown(stopCtx); err != nil {
 				logger.Error("Error shutting down HTTP server", "name", srv.name, "error", err)
-			} else {
-				logger.Info("HTTP server stopped", "name", srv.name)
+				return err
 			}
+
+			logger.Info("HTTP server stopped", "name", srv.name)
+			return nil
 		}, nil
 	})
 
