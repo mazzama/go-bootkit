@@ -22,7 +22,7 @@ type RedisCache struct {
 
 type RedisOption func(*RedisCache)
 
-func NewRedisCache(options ...RedisOption) *RedisCache {
+func NewRedisCache(options ...RedisOption) (*RedisCache, error) {
 	cache := &RedisCache{
 		name: "redis-cache",
 		options: &redis.Options{
@@ -34,6 +34,10 @@ func NewRedisCache(options ...RedisOption) *RedisCache {
 
 	for _, option := range options {
 		option(cache)
+	}
+
+	if cache.options.Addr == "" {
+		return nil, fmt.Errorf("redis address cannot be empty")
 	}
 
 	cache.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
@@ -50,7 +54,7 @@ func NewRedisCache(options ...RedisOption) *RedisCache {
 		}, nil
 	})
 
-	return cache
+	return cache, nil
 }
 
 func WithName(name string) RedisOption {

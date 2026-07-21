@@ -113,3 +113,31 @@ func defaultOptions() *redis.Options {
 		DB:       0,
 	}
 }
+
+func TestNewRedisCacheValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		addr    string
+		wantErr bool
+	}{
+		{
+			name:    "valid address",
+			addr:    "localhost:6379",
+			wantErr: false,
+		},
+		{
+			name:    "empty address",
+			addr:    "",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewRedisCache(WithAddress(tt.addr))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewRedisCache() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
