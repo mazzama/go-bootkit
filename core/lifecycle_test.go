@@ -218,3 +218,10 @@ func TestLifecycle_StopForwardsContext(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, sentinel, receivedCtx.Value(ctxKey{}), "Stop should forward its context to the stop closure")
 }
+
+func TestLifecycle_StartNilConnectReturnsError(t *testing.T) {
+	lc := Lifecycle{}
+	err := lc.Start(context.Background())
+	assert.Error(t, err)
+	assert.Equal(t, "core.Lifecycle: Connect closure is not set", err.Error())
+}

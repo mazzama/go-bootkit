@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
@@ -42,7 +43,7 @@ func (l *Lifecycle) Start(ctx context.Context) error {
 	l.initReady()
 
 	if l.Connect == nil {
-		panic("core.Lifecycle: Connect closure is not set")
+		return errors.New("core.Lifecycle: Connect closure is not set")
 	}
 
 	stop, err := l.Connect(ctx)
