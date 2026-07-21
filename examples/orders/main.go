@@ -53,16 +53,22 @@ func run() error {
 
 	// 4. Infrastructure components. The runner starts these; their pools/clients
 	//    are nil until then, which is why the TxManager reads the pool lazily.
-	db := databasekit.NewPostgresDB(
+	db, err := databasekit.NewPostgresDB(
 		databasekit.WithConnectionString(cfg.DBConnStr),
 		databasekit.WithLogger(logger),
 	)
+	if err != nil {
+		return err
+	}
 
-	cache := cachekit.NewRedisCache(
+	cache, err := cachekit.NewRedisCache(
 		cachekit.WithAddress(cfg.RedisAddr),
 		cachekit.WithPassword(cfg.RedisPassword),
 		cachekit.WithLogger(logger),
 	)
+	if err != nil {
+		return err
+	}
 
 	// 5. Domain wiring. The TxManager is built over a lazy provider so it can be
 	//    constructed before the runner has opened the pool.
@@ -83,7 +89,10 @@ func run() error {
 	handler.Routes(router)
 
 	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")
-	server := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, httpHandler, serverkit.WithLogger(logger))
+	server, err := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, httpHandler, serverkit.WithLogger(logger))
+	if err != nil {
+		return err
+	}
 
 	// 7. Run. The runner starts db, cache, and server; auto-registers their
 	//    health checks; and shuts everything down gracefully on SIGINT/SIGTERM.
