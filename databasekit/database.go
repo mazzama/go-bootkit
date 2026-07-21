@@ -23,7 +23,7 @@ type PostgresDB struct {
 
 type PostgresOption func(*PostgresDB)
 
-func NewPostgresDB(options ...PostgresOption) *PostgresDB {
+func NewPostgresDB(options ...PostgresOption) (*PostgresDB, error) {
 	db := &PostgresDB{
 		name:    "postgres-db",
 		connStr: "postgres://postgres:postgres@localhost:5432/postgres",
@@ -33,12 +33,12 @@ func NewPostgresDB(options ...PostgresOption) *PostgresDB {
 		option(db)
 	}
 
-	db.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
-		config, errConfig := db.buildPoolConfig()
-		if errConfig != nil {
-			return nil, errConfig
-		}
+	config, errConfig := db.buildPoolConfig()
+	if errConfig != nil {
+		return nil, errConfig
+	}
 
+	db.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
 		pool, err := pgxpool.NewWithConfig(ctx, config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create connection pool: %w", err)
@@ -56,7 +56,7 @@ func NewPostgresDB(options ...PostgresOption) *PostgresDB {
 		}, nil
 	})
 
-	return db
+	return db, nil
 }
 
 // buildPoolConfig parses the connection string and layers the sizing options on

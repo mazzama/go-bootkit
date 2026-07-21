@@ -149,3 +149,31 @@ func TestHealthCheckReadinessReturnsErrorWhenPoolNil(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestNewPostgresDBValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		connStr string
+		wantErr bool
+	}{
+		{
+			name:    "valid connection string",
+			connStr: "postgres://user:pass@localhost:5432/mydb",
+			wantErr: false,
+		},
+		{
+			name:    "invalid connection string",
+			connStr: "://not-a-valid-dsn",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewPostgresDB(WithConnectionString(tt.connStr))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewPostgresDB() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
