@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/databasekit"
 )
 
@@ -15,22 +16,13 @@ import (
 // invalidation is ever missed.
 const productCacheTTL = 60 * time.Second
 
-// Cache is the subset of a key/value cache the service needs. cachekit.RedisCache
-// satisfies it, but the narrow interface keeps the service decoupled from Redis
-// and easy to substitute in tests.
-type Cache interface {
-	Get(ctx context.Context, key string) (string, error)
-	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
-	Delete(ctx context.Context, key string) error
-}
-
 // OrderService holds the business logic for products and orders. It owns the
 // transaction boundary (via TxManager.WithTx) and the cache-aside read path.
 type OrderService struct {
 	txManager *databasekit.TxManager
 	products  ProductRepository
 	orders    OrderRepository
-	cache     Cache
+	cache     cachekit.Cache
 	logger    *slog.Logger
 }
 
@@ -39,7 +31,7 @@ func NewOrderService(
 	txManager *databasekit.TxManager,
 	products ProductRepository,
 	orders OrderRepository,
-	cache Cache,
+	cache cachekit.Cache,
 	logger *slog.Logger,
 ) *OrderService {
 	if logger == nil {

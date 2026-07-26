@@ -27,7 +27,8 @@ type Option func(*ApplicationRunner)
 
 func NewApplicationRunner(options ...Option) *ApplicationRunner {
 	runner := &ApplicationRunner{
-		shutdownTimeout: 15 * time.Second, // Default shutdown timeout
+		shutdownTimeout:  15 * time.Second,           // Default shutdown timeout
+		healthAggregator: healthkit.NewAggregator(0), // 0 applies 1s floor
 	}
 
 	for _, option := range options {
@@ -67,6 +68,22 @@ func WithServices(services ...Component) Option {
 	}
 }
 
+// HealthAggregator returns the runner's health check aggregator. Use it to wire
+// health endpoints into your HTTP router before calling Run.
+func (r *ApplicationRunner) HealthAggregator() *healthkit.Aggregator {
+	return r.healthAggregator
+}
+
+// WithHealthCacheTTL sets the cache TTL for the health check aggregator.
+// A value of 0 applies a safe 1s floor; a negative value disables caching.
+func WithHealthCacheTTL(d time.Duration) Option {
+	return func(a *ApplicationRunner) {
+		a.healthAggregator = healthkit.NewAggregator(d)
+	}
+}
+
+// Deprecated: WithHealthAggregator overrides the runner's internal health aggregator.
+// Prefer WithHealthCacheTTL to configure the default aggregator's cache duration.
 func WithHealthAggregator(agg *healthkit.Aggregator) Option {
 	return func(a *ApplicationRunner) {
 		a.healthAggregator = agg
@@ -75,11 +92,9 @@ func WithHealthAggregator(agg *healthkit.Aggregator) Option {
 
 func (r *ApplicationRunner) Run(ctx context.Context) error {
 	r.mu.Lock()
-	if r.healthAggregator != nil {
-		for _, s := range r.services {
-			if provider, ok := s.(HealthCheckProvider); ok {
-				r.healthAggregator.Register(provider.HealthChecks()...)
-			}
+	for _, s := range r.services {
+		if provider, ok := s.(HealthCheckProvider); ok {
+			r.healthAggregator.Register(provider.HealthChecks()...)
 		}
 	}
 	r.mu.Unlock()

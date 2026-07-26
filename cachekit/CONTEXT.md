@@ -6,8 +6,9 @@ It is part of the core infrastructure layer of the application.
 ## Glossary
 
 - **CacheKit**: The module name for caching infrastructure.
-- **Cache**: A component that implements the `core.Component` lifecycle and provides caching functionality.
+- **Cache**: Interface for generic cache operations (`Get`, `Set`, `Delete`, `Exists`). Decouples consumers from Redis.
 - **RedisCache**: The specific implementation of `Cache` using Redis.
+- **MemoryCache**: In-memory test adapter in `cachekit/memcache`. Implements `Cache` without external dependencies.
 
 ## Architecture
 

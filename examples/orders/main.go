@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/core"
-	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/mazzama/go-bootkit/serverkit"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -78,14 +77,18 @@ func run() error {
 	service := NewOrderService(txManager, productRepo, orderRepo, cache, logger)
 	handler := NewHandler(service, logger)
 
+	runner := core.NewApplicationRunner(
+		core.WithLogger(logger),
+		core.WithServices(db, cache),
+	)
+
 	// 6. HTTP server. NewDefaultHandler gives a chi router with health probes,
 	//    request logging, and panic recovery already wired. We mount the example
 	//    routes onto it, then wrap the whole router in the OpenTelemetry HTTP
 	//    middleware. Wrapping at the server level (rather than router.Use) avoids
 	//    chi's "middleware after routes" panic, since the default handler has
 	//    already registered its health routes.
-	healthAggregator := healthkit.NewAggregator(5 * time.Second)
-	router := serverkit.NewDefaultHandler(healthAggregator, logger).(*chi.Mux)
+	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger).(*chi.Mux)
 	handler.Routes(router)
 
 	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")
@@ -96,11 +99,7 @@ func run() error {
 
 	// 7. Run. The runner starts db, cache, and server; auto-registers their
 	//    health checks; and shuts everything down gracefully on SIGINT/SIGTERM.
-	runner := core.NewApplicationRunner(
-		core.WithLogger(logger),
-		core.WithHealthAggregator(healthAggregator),
-		core.WithServices(db, cache, server),
-	)
+	core.WithServices(server)(runner)
 
 	logger.Info("starting orders example", "http_addr", cfg.HTTPAddr)
 	return runner.Run(context.Background())

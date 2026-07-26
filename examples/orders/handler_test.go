@@ -9,13 +9,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mazzama/go-bootkit/cachekit/memcache"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/suite"
@@ -34,7 +34,7 @@ type OrdersSuite struct {
 	container *postgres.PostgresContainer
 	pool      *pgxpool.Pool
 	server    *httptest.Server
-	cache     *memoryCache
+	cache     *memcache.MemoryCache
 	ctx       context.Context
 }
 
@@ -72,7 +72,7 @@ func (s *OrdersSuite) SetupSuite() {
 	// Wire the domain exactly as main does, over a provider backed by the pool.
 	logger := slog.New(slog.NewTextHandler(&discardWriter{}, nil))
 	txManager := databasekit.NewTxManager(lazyPoolProvider{pool: func() *pgxpool.Pool { return pool }})
-	s.cache = newMemoryCache()
+	s.cache = memcache.New()
 	service := NewOrderService(
 		txManager,
 		NewProductRepository(txManager),
@@ -102,7 +102,7 @@ func (s *OrdersSuite) TearDownSuite() {
 func (s *OrdersSuite) SetupTest() {
 	_, err := s.pool.Exec(s.ctx, "TRUNCATE orders, products RESTART IDENTITY CASCADE")
 	s.Require().NoError(err, "truncate tables")
-	s.cache.reset()
+	s.cache.Reset()
 }
 
 func (s *OrdersSuite) runMigrations(connStr string) {
@@ -158,7 +158,8 @@ func (s *OrdersSuite) TestGetProductCachesOnMiss() {
 
 	// Then the response is 200 and the cache now holds the product
 	s.Equal(http.StatusOK, resp.StatusCode)
-	s.True(s.cache.has(productCacheKey(id)), "expected product to be cached after read")
+	exists, _ := s.cache.Exists(s.ctx, productCacheKey(id))
+	s.True(exists, "expected product to be cached after read")
 }
 
 func (s *OrdersSuite) TestGetProductNotFound() {
@@ -176,7 +177,8 @@ func (s *OrdersSuite) TestCreateOrderDecrementsStockAndInvalidatesCache() {
 	id := s.seedProduct("Widget", 1500, 10)
 	getResp := s.doJSON(http.MethodGet, fmt.Sprintf("/products/%d", id), nil)
 	getResp.Body.Close()
-	s.Require().True(s.cache.has(productCacheKey(id)))
+	exists, _ := s.cache.Exists(s.ctx, productCacheKey(id))
+	s.Require().True(exists)
 
 	// When an order for 3 units is placed
 	resp := s.doJSON(http.MethodPost, "/orders", createOrderRequest{ProductID: id, Quantity: 3})
@@ -194,7 +196,8 @@ func (s *OrdersSuite) TestCreateOrderDecrementsStockAndInvalidatesCache() {
 	s.Equal(int64(7), stock)
 
 	// And the cached product was invalidated after commit
-	s.False(s.cache.has(productCacheKey(id)), "expected cache to be invalidated after order")
+	exists, _ = s.cache.Exists(s.ctx, productCacheKey(id))
+	s.False(exists, "expected cache to be invalidated after order")
 }
 
 func (s *OrdersSuite) TestCreateOrderInsufficientStockRollsBack() {
@@ -294,66 +297,6 @@ func (s *OrdersSuite) dbCount(table string) int64 {
 	err := s.pool.QueryRow(s.ctx, "SELECT count(*) FROM "+table).Scan(&n)
 	s.Require().NoError(err, "count rows")
 	return n
-}
-
-// memoryCache is an in-memory Cache used by the suite so the integration test
-// needs only a single container while still exercising the cache-aside and
-// invalidation code paths (which it asserts on directly via has()).
-type memoryCache struct {
-	data map[string]string
-	mu   sync.Mutex
-}
-
-func newMemoryCache() *memoryCache {
-	return &memoryCache{data: make(map[string]string)}
-}
-
-func (c *memoryCache) Get(_ context.Context, key string) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	v, ok := c.data[key]
-	if !ok {
-		return "", fmt.Errorf("cache miss")
-	}
-	return v, nil
-}
-
-func (c *memoryCache) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	switch v := value.(type) {
-	case string:
-		c.data[key] = v
-	case []byte:
-		c.data[key] = string(v)
-	default:
-		b, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-		c.data[key] = string(b)
-	}
-	return nil
-}
-
-func (c *memoryCache) Delete(_ context.Context, key string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.data, key)
-	return nil
-}
-
-func (c *memoryCache) has(key string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, ok := c.data[key]
-	return ok
-}
-
-func (c *memoryCache) reset() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.data = make(map[string]string)
 }
 
 // discardWriter silences logger output during tests.

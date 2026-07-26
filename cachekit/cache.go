@@ -11,6 +11,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Cache is the interface for generic cache operations. RedisCache satisfies it;
+// for tests, use memcache.New() from the cachekit/memcache sub-package.
+type Cache interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
+	Delete(ctx context.Context, key string) error
+	Exists(ctx context.Context, key string) (bool, error)
+}
+
 type RedisCache struct {
 	core.Lifecycle
 
@@ -130,3 +139,4 @@ func (r *RedisCache) HealthChecks() []healthkit.Check {
 
 var _ core.Component = (*RedisCache)(nil)
 var _ core.Readyable = (*RedisCache)(nil)
+var _ Cache = (*RedisCache)(nil)

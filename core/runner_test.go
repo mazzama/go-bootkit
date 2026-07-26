@@ -61,6 +61,9 @@ func TestNewApplicationRunnerDefaults(t *testing.T) {
 	if len(r.services) != 0 {
 		t.Errorf("expected no services, got %d", len(r.services))
 	}
+	if r.HealthAggregator() == nil {
+		t.Error("expected default healthAggregator to be non-nil")
+	}
 }
 
 func TestWithShutdownTimeoutIgnoresNonPositive(t *testing.T) {
@@ -219,7 +222,6 @@ func (m *mockHealthComponent) HealthChecks() []healthkit.Check {
 }
 
 func TestRunPropagatesHealthChecks(t *testing.T) {
-	agg := healthkit.NewAggregator(0)
 	svc := &mockHealthComponent{
 		mockComponent: mockComponent{
 			name:    "health-svc",
@@ -240,7 +242,6 @@ func TestRunPropagatesHealthChecks(t *testing.T) {
 
 	r := NewApplicationRunner(
 		WithServices(svc),
-		WithHealthAggregator(agg),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -248,15 +249,20 @@ func TestRunPropagatesHealthChecks(t *testing.T) {
 
 	_ = r.Run(ctx)
 
-	// Check if our check got registered on the aggregator
-	// We can test this by checking if evaluate finds it (i.e. running it via http handler or registry)
-	// Since aggregator has Register method, we can check it evaluated successfully
+	agg := r.HealthAggregator()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	agg.Handler(healthkit.Liveness).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 OK from health handler, got %d", rec.Code)
+	}
+}
+
+func TestWithHealthCacheTTL(t *testing.T) {
+	r := NewApplicationRunner(WithHealthCacheTTL(10 * time.Second))
+	if r.HealthAggregator() == nil {
+		t.Error("expected non-nil healthAggregator when setting cache TTL")
 	}
 }
 

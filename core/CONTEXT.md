@@ -8,6 +8,9 @@ Core application lifecycle primitives and runner infrastructure.
 A primitive that manages the startup, readiness checks, and graceful shutdown of a collection of services.
 _Avoid_: Orchestrator, ProcessManager, AppRunner
 
+**HealthAggregator**:
+A runner-managed health check aggregator. Auto-collects health checks from registered components during `Run` and exposes an HTTP-compatible handler via `HealthAggregator()`.
+
 **HealthCheckProvider**:
 An interface that allows a service component to declare its internal liveness and readiness checks.
 _Avoid_: HealthChecker, HealthCheckSource
