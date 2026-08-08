@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type Kind int
@@ -35,6 +37,7 @@ type Aggregator struct {
 	checks   map[Kind][]Check
 	cacheTTL time.Duration
 	mu       sync.RWMutex
+	flight   singleflight.Group
 }
 
 // StandardChecks returns the standard liveness/readiness pair shared by
@@ -121,34 +124,39 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 		}
 	}
 
-	a.mu.RLock()
-	checks := append([]Check(nil), a.checks[kind]...)
-	a.mu.RUnlock()
+	key := fmt.Sprintf("%d", kind)
+	_, err, _ := a.flight.Do(key, func() (interface{}, error) {
+		a.mu.RLock()
+		checks := append([]Check(nil), a.checks[kind]...)
+		a.mu.RUnlock()
 
-	errCh := make(chan error, len(checks))
-	var wg sync.WaitGroup
-	wg.Add(len(checks))
-	for _, c := range checks {
-		check := c
-		go func() {
-			defer wg.Done()
-			ctxTimeout, cancel := context.WithTimeout(ctx, check.Timeout)
-			defer cancel()
-			if err := check.Fn(ctxTimeout); err != nil {
-				errCh <- fmt.Errorf("%s: %w", check.Name, err)
-			}
-		}()
-	}
-	wg.Wait()
-	close(errCh)
+		errCh := make(chan error, len(checks))
+		var wg sync.WaitGroup
+		wg.Add(len(checks))
+		for _, c := range checks {
+			check := c
+			go func() {
+				defer wg.Done()
+				ctxTimeout, cancel := context.WithTimeout(ctx, check.Timeout)
+				defer cancel()
+				if err := check.Fn(ctxTimeout); err != nil {
+					errCh <- fmt.Errorf("%s: %w", check.Name, err)
+				}
+			}()
+		}
+		wg.Wait()
+		close(errCh)
 
-	var errs []error
-	for e := range errCh {
-		errs = append(errs, e)
-	}
-	err := errors.Join(errs...)
+		var errs []error
+		for e := range errCh {
+			errs = append(errs, e)
+		}
+		finalErr := errors.Join(errs...)
 
-	a.cache[kind].Store(cachedResult{err: err, at: now})
+		a.cache[kind].Store(cachedResult{err: finalErr, at: time.Now()})
+
+		return nil, finalErr
+	})
 
 	return err
 }

@@ -139,19 +139,31 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 
 	err := eg.Wait()
 
-	shCtx, cancel := context.WithTimeout(context.Background(), r.shutdownTimeout)
-	defer cancel()
-
 	var shutdownErrs []error
+	remainingTimeout := r.shutdownTimeout
+
 	// Shutdown sequentially in reverse registration order
 	for i := len(r.services) - 1; i >= 0; i-- {
 		svc := r.services[i]
+		
+		budget := remainingTimeout / time.Duration(i+1)
+		start := time.Now()
+		shCtx, cancel := context.WithTimeout(context.Background(), budget)
+		
 		if stopErr := svc.Stop(shCtx); stopErr != nil {
 			wrappedErr := fmt.Errorf("%s: shutdown error: %w", svc.Name(), stopErr)
 			if r.logger != nil {
 				r.logger.Error("Service shutdown error", "error", wrappedErr)
 			}
 			shutdownErrs = append(shutdownErrs, wrappedErr)
+		}
+		
+		cancel()
+		
+		elapsed := time.Since(start)
+		remainingTimeout -= elapsed
+		if remainingTimeout < 0 {
+			remainingTimeout = 0
 		}
 	}
 
