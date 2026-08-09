@@ -33,8 +33,8 @@ type Component interface {
 ```
 
 Components that embed `core.Lifecycle` automatically support readiness gating
-(`Ready() <-chan struct{}`). The runner discovers readiness through a type
-assertion on the `Ready()` method — no separate exported interface needed.
+(`Ready() <-chan struct{}`). The runner discovers readiness through the
+`core.Readyable` interface — new adapters should implement it for compile-time safety.
 
 ### Functional Options Pattern
 All components use functional options for configuration:
@@ -49,7 +49,7 @@ db, err := databasekit.NewPostgresDB(connStr,
 ### Application Runner
 The `core.ApplicationRunner` orchestrates multiple services:
 - Starts all services concurrently using errgroup
-- Supports start deadlines for components that expose `Ready() <-chan struct{}`
+- Supports start deadlines for components that implement `core.Readyable`
 - Handles graceful shutdown on SIGINT/SIGTERM
 - Runs Stop() on all services sequentially in reverse order during shutdown
 

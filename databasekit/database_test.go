@@ -107,33 +107,34 @@ func TestWithLogger(t *testing.T) {
 	}
 }
 
-func TestPostgresDBMethodsWhenPoolNil(t *testing.T) {
+func TestPostgresDBTxProviderWhenPoolNil(t *testing.T) {
 	db := &PostgresDB{}
 	ctx := t.Context()
 
-	_, err := db.Exec(ctx, "SELECT 1")
+	tp := db.TxProvider()
+	if tp == nil {
+		t.Fatal("expected non-nil TxProvider")
+	}
+
+	_, err := tp.Exec(ctx, "SELECT 1")
 	if err == nil || err.Error() != "database pool is not initialized" {
 		t.Errorf("Exec unexpected error: %v", err)
 	}
 
-	_, err = db.Query(ctx, "SELECT 1")
+	_, err = tp.Query(ctx, "SELECT 1")
 	if err == nil || err.Error() != "database pool is not initialized" {
 		t.Errorf("Query unexpected error: %v", err)
 	}
 
 	var dummy int
-	err = db.QueryRow(ctx, "SELECT 1").Scan(&dummy)
+	err = tp.QueryRow(ctx, "SELECT 1").Scan(&dummy)
 	if err == nil || err.Error() != "database pool is not initialized" {
 		t.Errorf("QueryRow unexpected error: %v", err)
 	}
 
-	_, err = db.Begin(ctx)
+	_, err = tp.Begin(ctx)
 	if err == nil || err.Error() != "database pool is not initialized" {
 		t.Errorf("Begin unexpected error: %v", err)
-	}
-
-	if db.TxProvider() != db {
-		t.Error("TxProvider should return db")
 	}
 }
 

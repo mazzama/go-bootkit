@@ -6,14 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/mazzama/go-bootkit/core"
 )
 
 type txKey struct{}
-
-type readyable interface {
-	Ready() <-chan struct{}
-}
-
 type errRow struct{ err error }
 
 func (e errRow) Scan(dest ...any) error {
@@ -25,7 +21,7 @@ type readyQuerier struct {
 }
 
 func (r readyQuerier) wait(ctx context.Context) error {
-	if rd, ok := r.provider.(readyable); ok {
+	if rd, ok := r.provider.(core.Readyable); ok {
 		select {
 		case <-rd.Ready():
 			return nil
@@ -94,7 +90,7 @@ func (tm *TxManager) QuerierFromContext(ctx context.Context) Querier {
 	if tx, ok := TxFromContext(ctx); ok {
 		return tx
 	}
-	if _, ok := tm.provider.(readyable); ok {
+	if _, ok := tm.provider.(core.Readyable); ok {
 		return readyQuerier{provider: tm.provider}
 	}
 	return tm.provider
@@ -114,7 +110,7 @@ func (tm *TxManager) WithTx(ctx context.Context, fn func(ctx context.Context) er
 			return fmt.Errorf("failed to begin nested transaction (savepoint): %w", err)
 		}
 	} else {
-		if rd, ok := tm.provider.(readyable); ok {
+		if rd, ok := tm.provider.(core.Readyable); ok {
 			select {
 			case <-rd.Ready():
 			case <-ctx.Done():

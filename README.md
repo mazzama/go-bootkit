@@ -56,13 +56,13 @@ func main() {
 	)
 	
 	// Create transaction manager
-	txManager := databasekit.NewTxManager(db.Pool())
+	txManager := databasekit.NewTxManager(db.TxProvider())
 
 	// 3. Setup HTTP Server and Routes
 	healthAggregator := healthkit.NewAggregator(5 * time.Second)
 	handler := serverkit.NewDefaultHandler(healthAggregator, logger)
 	
-	// Add custom routes (type assertion since we know the default is a chi router)
+	// Add custom routes (type assertion since the default handler returns http.Handler)
 	mux := handler.(*chi.Mux)
 	mux.Get("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

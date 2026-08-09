@@ -12,6 +12,13 @@ type Component interface {
 	Stop(ctx context.Context) error
 }
 
+// Readyable signals that a component has an observable readiness channel.
+// The channel closes when the component is fully connected and ready to serve.
+// Lifecycle implements Readyable; custom adapters may implement it directly.
+type Readyable interface {
+	Ready() <-chan struct{}
+}
+
 type HealthCheckProvider interface {
 	HealthChecks() []healthkit.Check
 }

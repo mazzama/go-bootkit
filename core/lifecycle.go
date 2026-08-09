@@ -92,3 +92,5 @@ func (l *Lifecycle) Ready() <-chan struct{} {
 	l.initReady()
 	return l.ready
 }
+
+var _ Readyable = (*Lifecycle)(nil)

@@ -154,7 +154,7 @@ func (r *ApplicationRunner) startSupervisor(ctx context.Context) error {
 		})
 
 		if r.startDeadline > 0 {
-			if rr, ok := svc.(interface{ Ready() <-chan struct{} }); ok && rr.Ready() != nil {
+			if rr, ok := svc.(Readyable); ok && rr.Ready() != nil {
 				readyCh := rr.Ready()
 				eg.Go(func() error {
 					timer := time.NewTimer(r.startDeadline)

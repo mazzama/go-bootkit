@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -23,6 +24,8 @@ type MockReadyProvider struct {
 func (m *MockReadyProvider) Ready() <-chan struct{} {
 	return m.readyChan
 }
+
+var _ core.Readyable = (*MockReadyProvider)(nil)
 
 func (m *MockProvider) Begin(ctx context.Context) (pgx.Tx, error) {
 	args := m.Called(ctx)

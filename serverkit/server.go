@@ -137,7 +137,7 @@ func WithMiddleware(middlewares ...func(http.Handler) http.Handler) RouterOption
 	}
 }
 
-func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger, opts ...RouterOption) chi.Router {
+func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger, opts ...RouterOption) http.Handler {
 	options := RouterOptions{Timeout: 60 * time.Second}
 	for _, opt := range opts {
 		opt(&options)
