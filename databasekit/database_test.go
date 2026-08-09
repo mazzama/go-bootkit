@@ -163,7 +163,6 @@ func TestPostgresDBConnectRetrySmallBackoff(t *testing.T) {
 	}
 }
 
-
 func TestPostgresDBConnectRetryContextCanceled(t *testing.T) {
 	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(5, 50*time.Millisecond))
 	if err != nil {

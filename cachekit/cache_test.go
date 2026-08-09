@@ -140,7 +140,6 @@ func TestRedisCacheConnectRetrySmallBackoff(t *testing.T) {
 	}
 }
 
-
 func TestRedisCacheConnectRetryContextCanceled(t *testing.T) {
 	cache, err := NewRedisCache("127.0.0.1:1", WithConnectRetry(5, 50*time.Millisecond))
 	if err != nil {
