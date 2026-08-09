@@ -1,8 +1,9 @@
 package databasekit
 
 import (
-	"github.com/jackc/pgx/v5/pgxpool"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPoolImplementsTxProvider(t *testing.T) {
