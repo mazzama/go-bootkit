@@ -2,6 +2,9 @@ package databasekit
 
 import (
 	"context"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +96,75 @@ func TestWithConnectRetry(t *testing.T) {
 	}
 	if db.retryBackoff != 2*time.Second {
 		t.Errorf("expected 2s backoff, got %v", db.retryBackoff)
+	}
+}
+func TestWithLogger(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	db := &PostgresDB{}
+	WithLogger(logger)(db)
+	if db.logger != logger {
+		t.Error("expected logger to be set")
+	}
+}
+
+func TestPostgresDBMethodsWhenPoolNil(t *testing.T) {
+	db := &PostgresDB{}
+	ctx := t.Context()
+
+	_, err := db.Exec(ctx, "SELECT 1")
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("Exec unexpected error: %v", err)
+	}
+
+	_, err = db.Query(ctx, "SELECT 1")
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("Query unexpected error: %v", err)
+	}
+
+	var dummy int
+	err = db.QueryRow(ctx, "SELECT 1").Scan(&dummy)
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("QueryRow unexpected error: %v", err)
+	}
+
+	_, err = db.Begin(ctx)
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("Begin unexpected error: %v", err)
+	}
+
+	if db.TxProvider() != db {
+		t.Error("TxProvider should return db")
+	}
+}
+
+func TestPostgresDBConnectRetryFailure(t *testing.T) {
+	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(2, 1*time.Millisecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = db.Start(ctx)
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to database") && !strings.Contains(err.Error(), "failed to create connection pool") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPostgresDBConnectRetryContextCanceled(t *testing.T) {
+	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(5, 50*time.Millisecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = db.Start(ctx)
+	if err == nil {
+		t.Fatal("expected context error")
+	}
+	if !strings.Contains(err.Error(), "context canceled during retry backoff") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

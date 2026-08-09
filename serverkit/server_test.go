@@ -278,3 +278,16 @@ func TestNewDefaultHandlerWithMiddleware(t *testing.T) {
 		t.Errorf("expected custom middleware to be applied, got header: %s", rec.Header().Get("X-Custom-Middleware"))
 	}
 }
+func TestWithRouterTimeout(t *testing.T) {
+	opts := &RouterOptions{}
+	WithRouterTimeout(5 * time.Second)(opts)
+	if opts.Timeout != 5*time.Second {
+		t.Errorf("expected 5s timeout, got %v", opts.Timeout)
+	}
+
+	// Should not set if d <= 0
+	WithRouterTimeout(0)(opts)
+	if opts.Timeout != 5*time.Second {
+		t.Errorf("expected 5s timeout, got %v", opts.Timeout)
+	}
+}
