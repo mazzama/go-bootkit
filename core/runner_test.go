@@ -410,7 +410,7 @@ func TestRunHooksAreCalled(t *testing.T) {
 	defer cancel()
 
 	_ = r.Run(ctx)
-	
+
 	// Trigger health check to ensure hook fires
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)

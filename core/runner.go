@@ -165,11 +165,11 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 	// Shutdown sequentially in reverse registration order
 	for i := len(r.services) - 1; i >= 0; i-- {
 		svc := r.services[i]
-		
+
 		budget := remainingTimeout / time.Duration(i+1)
 		start := time.Now()
 		shCtx, cancel := context.WithTimeout(context.Background(), budget)
-		
+
 		stopErr := svc.Stop(shCtx)
 		stopDuration := time.Since(start)
 		r.hooks.OnComponentStop(svc.Name(), stopDuration, stopErr)
@@ -181,9 +181,9 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 			}
 			shutdownErrs = append(shutdownErrs, wrappedErr)
 		}
-		
+
 		cancel()
-		
+
 		elapsed := time.Since(start)
 		remainingTimeout -= elapsed
 		if remainingTimeout < 0 {
