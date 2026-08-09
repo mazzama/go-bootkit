@@ -7,8 +7,12 @@ import (
 )
 
 type LoggerConfig struct {
-	Level  slog.Level
-	Writer io.Writer
+	Level       slog.Level
+	Writer      io.Writer
+	Handler     slog.Handler
+	ServiceName string
+	Version     string
+	Environment string
 }
 
 type LoggerOption func(*LoggerConfig)
@@ -27,6 +31,22 @@ func WithLogWriter(writer io.Writer) LoggerOption {
 	}
 }
 
+func WithServiceName(name string) LoggerOption {
+	return func(c *LoggerConfig) { c.ServiceName = name }
+}
+
+func WithVersion(v string) LoggerOption {
+	return func(c *LoggerConfig) { c.Version = v }
+}
+
+func WithEnvironment(e string) LoggerOption {
+	return func(c *LoggerConfig) { c.Environment = e }
+}
+
+func WithHandler(h slog.Handler) LoggerOption {
+	return func(c *LoggerConfig) { c.Handler = h }
+}
+
 // NewLogger creates a new *slog.Logger configured with JSON output
 // and trace context correlation.
 func NewLogger(options ...LoggerOption) *slog.Logger {
@@ -39,11 +59,29 @@ func NewLogger(options ...LoggerOption) *slog.Logger {
 		opt(config)
 	}
 
-	jsonHandler := slog.NewJSONHandler(config.Writer, &slog.HandlerOptions{
-		Level: config.Level,
-	})
+	var handler = config.Handler
+	if handler == nil {
+		handler = slog.NewJSONHandler(config.Writer, &slog.HandlerOptions{
+			Level: config.Level,
+		})
+	}
 
-	traceHandler := NewTraceHandler(jsonHandler)
+	var finalHandler slog.Handler = NewTraceHandler(handler)
 
-	return slog.New(traceHandler)
+	var attrs []slog.Attr
+	if config.ServiceName != "" {
+		attrs = append(attrs, slog.String("service.name", config.ServiceName))
+	}
+	if config.Version != "" {
+		attrs = append(attrs, slog.String("service.version", config.Version))
+	}
+	if config.Environment != "" {
+		attrs = append(attrs, slog.String("deployment.environment", config.Environment))
+	}
+
+	if len(attrs) > 0 {
+		finalHandler = finalHandler.WithAttrs(attrs)
+	}
+
+	return slog.New(finalHandler)
 }

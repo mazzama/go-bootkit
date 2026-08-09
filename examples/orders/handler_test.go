@@ -71,7 +71,7 @@ func (s *OrdersSuite) SetupSuite() {
 
 	// Wire the domain exactly as main does, over a provider backed by the pool.
 	logger := slog.New(slog.NewTextHandler(&discardWriter{}, nil))
-	txManager := databasekit.NewTxManager(lazyPoolProvider{pool: func() *pgxpool.Pool { return pool }})
+	txManager := databasekit.NewTxManager(pool)
 	s.cache = memcache.New()
 	service := NewOrderService(
 		txManager,
@@ -122,7 +122,7 @@ func (s *OrdersSuite) TestCreateProduct() {
 	resp := s.doJSON(http.MethodPost, "/products", createProductRequest{
 		Name: "Widget", PriceCents: 1500, Stock: 10,
 	})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Then the response is 201 with the created product
 	s.Equal(http.StatusCreated, resp.StatusCode)
@@ -141,7 +141,7 @@ func (s *OrdersSuite) TestCreateProductValidation() {
 	// Given a payload missing the required name
 	// When it is posted
 	resp := s.doJSON(http.MethodPost, "/products", createProductRequest{PriceCents: 100, Stock: 1})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Then the response is 400 and nothing is written (dbcheck)
 	s.Equal(http.StatusBadRequest, resp.StatusCode)
@@ -154,7 +154,7 @@ func (s *OrdersSuite) TestGetProductCachesOnMiss() {
 
 	// When it is fetched (cache miss -> Postgres -> populate)
 	resp := s.doJSON(http.MethodGet, fmt.Sprintf("/products/%d", id), nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Then the response is 200 and the cache now holds the product
 	s.Equal(http.StatusOK, resp.StatusCode)
@@ -166,7 +166,7 @@ func (s *OrdersSuite) TestGetProductNotFound() {
 	// Given no product with this id
 	// When it is fetched
 	resp := s.doJSON(http.MethodGet, "/products/999", nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Then the response is 404
 	s.Equal(http.StatusNotFound, resp.StatusCode)
@@ -176,13 +176,13 @@ func (s *OrdersSuite) TestCreateOrderDecrementsStockAndInvalidatesCache() {
 	// Given a product with stock 10, already cached by a prior read
 	id := s.seedProduct("Widget", 1500, 10)
 	getResp := s.doJSON(http.MethodGet, fmt.Sprintf("/products/%d", id), nil)
-	getResp.Body.Close()
+	_ = getResp.Body.Close()
 	exists, _ := s.cache.Exists(s.ctx, productCacheKey(id))
 	s.Require().True(exists)
 
 	// When an order for 3 units is placed
 	resp := s.doJSON(http.MethodPost, "/orders", createOrderRequest{ProductID: id, Quantity: 3})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Then the response is 201 with the computed total
 	s.Equal(http.StatusCreated, resp.StatusCode)
@@ -206,7 +206,7 @@ func (s *OrdersSuite) TestCreateOrderInsufficientStockRollsBack() {
 
 	// When an order for 5 units is placed
 	resp := s.doJSON(http.MethodPost, "/orders", createOrderRequest{ProductID: id, Quantity: 5})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Then the response is 409 Conflict
 	s.Equal(http.StatusConflict, resp.StatusCode)
@@ -223,11 +223,11 @@ func (s *OrdersSuite) TestGetOrderReturnsPersistedOrder() {
 	createResp := s.doJSON(http.MethodPost, "/orders", createOrderRequest{ProductID: id, Quantity: 2})
 	var created Order
 	s.decode(createResp, &created)
-	createResp.Body.Close()
+	_ = createResp.Body.Close()
 
 	// When the order is fetched by id
 	resp := s.doJSON(http.MethodGet, fmt.Sprintf("/orders/%d", created.ID), nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Then the response is 200 with the same order
 	s.Equal(http.StatusOK, resp.StatusCode)

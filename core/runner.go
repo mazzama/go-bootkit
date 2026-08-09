@@ -101,22 +101,38 @@ func WithHealthAggregator(agg *healthkit.Aggregator) Option {
 }
 
 func (r *ApplicationRunner) Run(ctx context.Context) error {
-	// Provide a hook callback to healthkit aggregator
+	r.healthWiring()
+
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	startErr := r.startSupervisor(ctx)
+	shutdownErrs := r.shutdownOrchestrator()
+
+	var allErrs []error
+	if startErr != nil {
+		allErrs = append(allErrs, startErr)
+	}
+	allErrs = append(allErrs, shutdownErrs...)
+
+	return errors.Join(allErrs...)
+}
+
+func (r *ApplicationRunner) healthWiring() {
 	r.healthAggregator.SetHook(func(kind healthkit.Kind, duration time.Duration, err error) {
 		r.hooks.OnHealthEvaluated(kind, duration, err)
 	})
 
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, s := range r.services {
 		if provider, ok := s.(HealthCheckProvider); ok {
 			r.healthAggregator.Register(provider.HealthChecks()...)
 		}
 	}
-	r.mu.Unlock()
+}
 
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
+func (r *ApplicationRunner) startSupervisor(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	for _, s := range r.services {
@@ -157,8 +173,10 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 		}
 	}
 
-	err := eg.Wait()
+	return eg.Wait()
+}
 
+func (r *ApplicationRunner) shutdownOrchestrator() []error {
 	var shutdownErrs []error
 	remainingTimeout := r.shutdownTimeout
 
@@ -190,12 +208,5 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 			remainingTimeout = 0
 		}
 	}
-
-	var allErrs []error
-	if err != nil {
-		allErrs = append(allErrs, err)
-	}
-	allErrs = append(allErrs, shutdownErrs...)
-
-	return errors.Join(allErrs...)
+	return shutdownErrs
 }

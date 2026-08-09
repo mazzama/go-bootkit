@@ -10,6 +10,12 @@ import (
 
 type txKey struct{}
 
+// QuerierResolver resolves a Querier from context, allowing repositories to depend
+// on a seam rather than the concrete TxManager.
+type QuerierResolver interface {
+	QuerierFromContext(ctx context.Context) Querier
+}
+
 // Querier is an interface that represents the common methods between pgxpool.Pool and pgx.Tx.
 type Querier interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)

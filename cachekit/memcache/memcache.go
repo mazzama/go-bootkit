@@ -25,14 +25,14 @@ func New() *MemoryCache {
 	return &MemoryCache{data: make(map[string]string)}
 }
 
-func (c *MemoryCache) Get(_ context.Context, key string) (string, error) {
+func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	v, ok := c.data[key]
 	if !ok {
-		return "", fmt.Errorf("cache miss: %s", key)
+		return fmt.Errorf("cache miss: %s", key)
 	}
-	return v, nil
+	return json.Unmarshal([]byte(v), dest)
 }
 
 func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {

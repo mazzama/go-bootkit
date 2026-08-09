@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -56,14 +55,13 @@ func (s *OrderService) CreateProduct(ctx context.Context, name string, price, st
 func (s *OrderService) GetProduct(ctx context.Context, id int64) (Product, error) {
 	key := productCacheKey(id)
 
-	if cached, err := s.cache.Get(ctx, key); err == nil {
-		var p Product
-		if unmarshalErr := json.Unmarshal([]byte(cached), &p); unmarshalErr == nil {
-			s.logger.DebugContext(ctx, "product cache hit", "product_id", id)
-			return p, nil
-		}
-		// A malformed cache entry is treated as a miss.
-		s.logger.WarnContext(ctx, "discarding malformed cache entry", "product_id", id)
+	var p Product
+	if err := s.cache.Get(ctx, key, &p); err == nil {
+		s.logger.DebugContext(ctx, "product cache hit", "product_id", id)
+		return p, nil
+	} else if err.Error() != "redis: nil" && err.Error() != "cache miss: "+key {
+		// A malformed cache entry is logged, but we fall back to the DB.
+		s.logger.WarnContext(ctx, "cache error or malformed entry", "product_id", id, "error", err)
 	}
 
 	p, err := s.products.GetByID(ctx, id)
@@ -71,11 +69,9 @@ func (s *OrderService) GetProduct(ctx context.Context, id int64) (Product, error
 		return Product{}, err
 	}
 
-	if encoded, err := json.Marshal(p); err == nil {
-		if setErr := s.cache.Set(ctx, key, encoded, productCacheTTL); setErr != nil {
-			// Caching is best-effort; a failure to populate must not fail the read.
-			s.logger.WarnContext(ctx, "failed to populate product cache", "product_id", id, "error", setErr)
-		}
+	if setErr := s.cache.Set(ctx, key, p, productCacheTTL); setErr != nil {
+		// Caching is best-effort; a failure to populate must not fail the read.
+		s.logger.WarnContext(ctx, "failed to populate product cache", "product_id", id, "error", setErr)
 	}
 
 	return p, nil

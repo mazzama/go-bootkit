@@ -3,15 +3,15 @@ package main
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/mazzama/go-bootkit/serverkit"
+	"github.com/mazzama/go-bootkit/workerkit"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -34,7 +34,10 @@ func run() error {
 	// 2. Trace-correlated logger. NewLogger wraps a JSON handler with the
 	//    TraceHandler, so any log emitted with a span in its context carries
 	//    trace_id/span_id.
-	logger := core.NewLogger(core.WithLogLevel(slog.LevelInfo))
+	logger := core.NewLogger(
+		core.WithLogLevel(slog.LevelInfo),
+		core.WithServiceName(serviceName),
+	)
 	slog.SetDefault(logger)
 
 	// 3. OpenTelemetry tracing to stdout, so the trace IDs above are real.
@@ -77,9 +80,22 @@ func run() error {
 	service := NewOrderService(txManager, productRepo, orderRepo, cache, logger)
 	handler := NewHandler(service, logger)
 
+	// Set up background worker (client + server)
+	redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr, Password: cfg.RedisPassword}
+	asyncClient := workerkit.NewAsynqClient("notification-client", redisOpt)
+	asyncServer := workerkit.NewAsynqServer(
+		"notification-worker",
+		redisOpt,
+		asynq.Config{Concurrency: 5},
+	)
+
+	// Register handlers
+	processor := NewNotificationProcessor(logger)
+	asyncServer.Mux().HandleFunc("notification:send", processor.Process)
+
 	runner := core.NewApplicationRunner(
 		core.WithLogger(logger),
-		core.WithServices(db, cache),
+		core.WithServices(db, cache, asyncClient, asyncServer),
 	)
 
 	// 6. HTTP server. NewDefaultHandler gives a chi router with health probes,
@@ -88,10 +104,10 @@ func run() error {
 	//    middleware. Wrapping at the server level (rather than router.Use) avoids
 	//    chi's "middleware after routes" panic, since the default handler has
 	//    already registered its health routes.
-	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger).(*chi.Mux)
+	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
 	handler.Routes(router)
 
-	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")
+	httpHandler := otelhttp.NewHandler(router, "http.server")
 	server, err := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, httpHandler, serverkit.WithLogger(logger))
 	if err != nil {
 		return err
