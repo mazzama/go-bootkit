@@ -36,6 +36,22 @@ func TestMemoryCache(t *testing.T) {
 		t.Fatalf("expected 'bar', got %q", dest)
 	}
 
+	// Test Exists on existing key
+	exists, err = cache.Exists(ctx, "foo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !exists {
+		t.Fatalf("expected foo to exist")
+	}
+
+	// Test Get with unmarshalable dest
+	var badDest chan int
+	err = cache.Get(ctx, "foo", &badDest)
+	if err == nil {
+		t.Fatalf("expected error when unmarshaling into bad dest")
+	}
+
 	// Test Set and Get struct
 	type Data struct {
 		Name string
