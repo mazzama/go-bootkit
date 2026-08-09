@@ -64,6 +64,83 @@ index fb42ef9..f3e6f17 100644
  }
  
  func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
+diff --git a/core/logger.go b/core/logger.go
+index 92ce85d..e34a05e 100644
+--- a/core/logger.go
++++ b/core/logger.go
+@@ -7,8 +7,12 @@ import (
+ )
+ 
+ type LoggerConfig struct {
+-	Level  slog.Level
+-	Writer io.Writer
++	Level       slog.Level
++	Writer      io.Writer
++	Handler     slog.Handler
++	ServiceName string
++	Version     string
++	Environment string
+ }
+ 
+ type LoggerOption func(*LoggerConfig)
+@@ -27,6 +31,22 @@ func WithLogWriter(writer io.Writer) LoggerOption {
+ 	}
+ }
+ 
++func WithServiceName(name string) LoggerOption {
++	return func(c *LoggerConfig) { c.ServiceName = name }
++}
++
++func WithVersion(v string) LoggerOption {
++	return func(c *LoggerConfig) { c.Version = v }
++}
++
++func WithEnvironment(e string) LoggerOption {
++	return func(c *LoggerConfig) { c.Environment = e }
++}
++
++func WithHandler(h slog.Handler) LoggerOption {
++	return func(c *LoggerConfig) { c.Handler = h }
++}
++
+ // NewLogger creates a new *slog.Logger configured with JSON output
+ // and trace context correlation.
+ func NewLogger(options ...LoggerOption) *slog.Logger {
+@@ -39,11 +59,29 @@ func NewLogger(options ...LoggerOption) *slog.Logger {
+ 		opt(config)
+ 	}
+ 
+-	jsonHandler := slog.NewJSONHandler(config.Writer, &slog.HandlerOptions{
+-		Level: config.Level,
+-	})
++	var handler = config.Handler
++	if handler == nil {
++		handler = slog.NewJSONHandler(config.Writer, &slog.HandlerOptions{
++			Level: config.Level,
++		})
++	}
++
++	var finalHandler slog.Handler = NewTraceHandler(handler)
+ 
+-	traceHandler := NewTraceHandler(jsonHandler)
++	var attrs []slog.Attr
++	if config.ServiceName != "" {
++		attrs = append(attrs, slog.String("service.name", config.ServiceName))
++	}
++	if config.Version != "" {
++		attrs = append(attrs, slog.String("service.version", config.Version))
++	}
++	if config.Environment != "" {
++		attrs = append(attrs, slog.String("deployment.environment", config.Environment))
++	}
++
++	if len(attrs) > 0 {
++		finalHandler = finalHandler.WithAttrs(attrs)
++	}
+ 
+-	return slog.New(traceHandler)
++	return slog.New(finalHandler)
+ }
 diff --git a/core/runner.go b/core/runner.go
 index 12d86cf..3650fa9 100644
 --- a/core/runner.go
@@ -171,6 +248,1006 @@ index 4b3f1a9..fc35537 100644
  // Querier is an interface that represents the common methods between pgxpool.Pool and pgx.Tx.
  type Querier interface {
  	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+diff --git a/diff.txt b/diff.txt
+new file mode 100644
+index 0000000..95b14fb
+--- /dev/null
++++ b/diff.txt
+@@ -0,0 +1,946 @@
++diff --git a/cachekit/cache.go b/cachekit/cache.go
++index 977294f..963ffb0 100644
++--- a/cachekit/cache.go
+++++ b/cachekit/cache.go
++@@ -2,6 +2,7 @@ package cachekit
++ 
++ import (
++ 	"context"
+++	"encoding/json"
++ 	"fmt"
++ 	"log/slog"
++ 	"time"
++@@ -14,7 +15,7 @@ import (
++ // Cache is the interface for generic cache operations. RedisCache satisfies it;
++ // for tests, use memcache.New() from the cachekit/memcache sub-package.
++ type Cache interface {
++-	Get(ctx context.Context, key string) (string, error)
+++	Get(ctx context.Context, key string, dest any) error
++ 	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
++ 	Delete(ctx context.Context, key string) error
++ 	Exists(ctx context.Context, key string) (bool, error)
++@@ -111,11 +112,19 @@ func (r *RedisCache) Client() *redis.Client {
++ }
++ 
++ func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
++-	return r.Client().Set(ctx, key, value, expiration).Err()
+++	b, err := json.Marshal(value)
+++	if err != nil {
+++		return err
+++	}
+++	return r.Client().Set(ctx, key, b, expiration).Err()
++ }
++ 
++-func (r *RedisCache) Get(ctx context.Context, key string) (string, error) {
++-	return r.Client().Get(ctx, key).Result()
+++func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
+++	str, err := r.Client().Get(ctx, key).Result()
+++	if err != nil {
+++		return err
+++	}
+++	return json.Unmarshal([]byte(str), dest)
++ }
++ 
++ func (r *RedisCache) Delete(ctx context.Context, key string) error {
++diff --git a/cachekit/memcache/memcache.go b/cachekit/memcache/memcache.go
++index fb42ef9..f3e6f17 100644
++--- a/cachekit/memcache/memcache.go
+++++ b/cachekit/memcache/memcache.go
++@@ -25,14 +25,14 @@ func New() *MemoryCache {
++ 	return &MemoryCache{data: make(map[string]string)}
++ }
++ 
++-func (c *MemoryCache) Get(_ context.Context, key string) (string, error) {
+++func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
++ 	c.mu.Lock()
++ 	defer c.mu.Unlock()
++ 	v, ok := c.data[key]
++ 	if !ok {
++-		return "", fmt.Errorf("cache miss: %s", key)
+++		return fmt.Errorf("cache miss: %s", key)
++ 	}
++-	return v, nil
+++	return json.Unmarshal([]byte(v), dest)
++ }
++ 
++ func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
++diff --git a/core/runner.go b/core/runner.go
++index 12d86cf..3650fa9 100644
++--- a/core/runner.go
+++++ b/core/runner.go
++@@ -101,22 +101,38 @@ func WithHealthAggregator(agg *healthkit.Aggregator) Option {
++ }
++ 
++ func (r *ApplicationRunner) Run(ctx context.Context) error {
++-	// Provide a hook callback to healthkit aggregator
+++	r.healthWiring()
+++
+++	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+++	defer stop()
+++
+++	startErr := r.startSupervisor(ctx)
+++	shutdownErrs := r.shutdownOrchestrator()
+++
+++	var allErrs []error
+++	if startErr != nil {
+++		allErrs = append(allErrs, startErr)
+++	}
+++	allErrs = append(allErrs, shutdownErrs...)
+++
+++	return errors.Join(allErrs...)
+++}
+++
+++func (r *ApplicationRunner) healthWiring() {
++ 	r.healthAggregator.SetHook(func(kind healthkit.Kind, duration time.Duration, err error) {
++ 		r.hooks.OnHealthEvaluated(kind, duration, err)
++ 	})
++ 
++ 	r.mu.Lock()
+++	defer r.mu.Unlock()
++ 	for _, s := range r.services {
++ 		if provider, ok := s.(HealthCheckProvider); ok {
++ 			r.healthAggregator.Register(provider.HealthChecks()...)
++ 		}
++ 	}
++-	r.mu.Unlock()
++-
++-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
++-	defer stop()
+++}
++ 
+++func (r *ApplicationRunner) startSupervisor(ctx context.Context) error {
++ 	eg, ctx := errgroup.WithContext(ctx)
++ 
++ 	for _, s := range r.services {
++@@ -157,8 +173,10 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
++ 		}
++ 	}
++ 
++-	err := eg.Wait()
+++	return eg.Wait()
+++}
++ 
+++func (r *ApplicationRunner) shutdownOrchestrator() []error {
++ 	var shutdownErrs []error
++ 	remainingTimeout := r.shutdownTimeout
++ 
++@@ -190,12 +208,5 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
++ 			remainingTimeout = 0
++ 		}
++ 	}
++-
++-	var allErrs []error
++-	if err != nil {
++-		allErrs = append(allErrs, err)
++-	}
++-	allErrs = append(allErrs, shutdownErrs...)
++-
++-	return errors.Join(allErrs...)
+++	return shutdownErrs
++ }
++diff --git a/databasekit/check_test.go b/databasekit/check_test.go
++new file mode 100644
++index 0000000..19e71d9
++--- /dev/null
+++++ b/databasekit/check_test.go
++@@ -0,0 +1,10 @@
+++package databasekit
+++
+++import (
+++	"github.com/jackc/pgx/v5/pgxpool"
+++	"testing"
+++)
+++
+++func TestPoolImplementsTxProvider(t *testing.T) {
+++	var _ TxProvider = (*pgxpool.Pool)(nil)
+++}
++diff --git a/databasekit/txmanager.go b/databasekit/txmanager.go
++index 4b3f1a9..fc35537 100644
++--- a/databasekit/txmanager.go
+++++ b/databasekit/txmanager.go
++@@ -10,6 +10,12 @@ import (
++ 
++ type txKey struct{}
++ 
+++// QuerierResolver resolves a Querier from context, allowing repositories to depend
+++// on a seam rather than the concrete TxManager.
+++type QuerierResolver interface {
+++	QuerierFromContext(ctx context.Context) Querier
+++}
+++
++ // Querier is an interface that represents the common methods between pgxpool.Pool and pgx.Tx.
++ type Querier interface {
++ 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
++diff --git a/examples/orders/go.mod b/examples/orders/go.mod
++index b9a0f00..761b52f 100644
++--- a/examples/orders/go.mod
+++++ b/examples/orders/go.mod
++@@ -4,11 +4,17 @@ go 1.26.5
++ 
++ require (
++ 	github.com/go-chi/chi/v5 v5.2.3
+++	github.com/hibiken/asynq v0.26.0
++ 	github.com/jackc/pgx/v5 v5.10.0
++ 	github.com/mazzama/go-bootkit/cachekit v0.1.4
++ 	github.com/mazzama/go-bootkit/core v0.1.3
++ 	github.com/mazzama/go-bootkit/databasekit v0.1.2
++ 	github.com/mazzama/go-bootkit/serverkit v0.1.3
+++	github.com/mazzama/go-bootkit/workerkit v0.0.0-00010101000000-000000000000
+++	github.com/pressly/goose/v3 v3.27.2
+++	github.com/stretchr/testify v1.11.1
+++	github.com/testcontainers/testcontainers-go v0.42.0
+++	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
++ 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
++ 	go.opentelemetry.io/otel v1.44.0
++ 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.44.0
++@@ -58,14 +64,12 @@ require (
++ 	github.com/opencontainers/image-spec v1.1.1 // indirect
++ 	github.com/pmezard/go-difflib v1.0.0 // indirect
++ 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
++-	github.com/pressly/goose/v3 v3.27.2 // indirect
++ 	github.com/redis/go-redis/v9 v9.17.2 // indirect
+++	github.com/robfig/cron/v3 v3.0.1 // indirect
++ 	github.com/sethvargo/go-retry v0.3.0 // indirect
++ 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
++ 	github.com/sirupsen/logrus v1.9.4 // indirect
++-	github.com/stretchr/testify v1.11.1 // indirect
++-	github.com/testcontainers/testcontainers-go v0.42.0 // indirect
++-	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0 // indirect
+++	github.com/spf13/cast v1.10.0 // indirect
++ 	github.com/tklauser/go-sysconf v0.3.16 // indirect
++ 	github.com/tklauser/numcpus v0.11.0 // indirect
++ 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
++@@ -77,5 +81,11 @@ require (
++ 	golang.org/x/sync v0.21.0 // indirect
++ 	golang.org/x/sys v0.45.0 // indirect
++ 	golang.org/x/text v0.37.0 // indirect
+++	golang.org/x/time v0.14.0 // indirect
+++	google.golang.org/protobuf v1.36.11 // indirect
++ 	gopkg.in/yaml.v3 v3.0.1 // indirect
++ )
+++
+++replace github.com/mazzama/go-bootkit/cachekit => ../../cachekit
+++
+++replace github.com/mazzama/go-bootkit/workerkit => ../../workerkit
++diff --git a/examples/orders/go.sum b/examples/orders/go.sum
++index 4897418..410f2a5 100644
++--- a/examples/orders/go.sum
+++++ b/examples/orders/go.sum
++@@ -1,5 +1,7 @@
++ dario.cat/mergo v1.0.2 h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=
++ dario.cat/mergo v1.0.2/go.mod h1:E/hbnu0NxMFBjpMIE34DRGLWqDy0g5FuKDhCb31ngxA=
+++github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 h1:He8afgbRMd7mFxO99hRNu+6tazq8nFF9lIwo9JFroBk=
+++github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6/go.mod h1:8o94RPi1/7XTJvwPpRSzSUedZrtlirdB3r9Z20bi2f8=
++ github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c h1:udKWzYgxTojEKWjV8V+WSxDXJ4NFATAsZjh8iIbsQIg=
++ github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c/go.mod h1:xomTg63KZ2rFqZQzSB4Vz2SUXa1BpHTVz9L5PTmPC4E=
++ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
++@@ -22,6 +24,8 @@ github.com/containerd/platforms v0.2.1 h1:zvwtM3rz2YHPQsF2CHYM8+KtB5dvhISiXh5ZpS
++ github.com/containerd/platforms v0.2.1/go.mod h1:XHCb+2/hzowdiut9rkudds9bE5yJ7npe7dG/wG+uFPw=
++ github.com/cpuguy83/dockercfg v0.3.2 h1:DlJTyZGBDlXqUZ2Dk2Q3xHs/FtnooJJVaad2S9GKorA=
++ github.com/cpuguy83/dockercfg v0.3.2/go.mod h1:sugsbF4//dDlL/i+S+rtpIWp+5h0BHJHfjj5/jFyUJc=
+++github.com/creack/pty v1.1.24 h1:bJrF4RRfyJnbTJqzRLHzcGaZK1NeM5kTC9jGgovnR1s=
+++github.com/creack/pty v1.1.24/go.mod h1:08sCNb52WyoAwi2QDyzUCTgcvVFhUzewun7wtTfvcwE=
++ github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
++ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
++ github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
++@@ -33,10 +37,14 @@ github.com/docker/go-connections v0.7.0 h1:6SsRfJddP22WMrCkj19x9WKjEDTB+ahsdiGYf
++ github.com/docker/go-connections v0.7.0/go.mod h1:no1qkHdjq7kLMGUXYAduOhYPSJxxvgWBh7ogVvptn3Q=
++ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
++ github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
+++github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
+++github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
++ github.com/ebitengine/purego v0.10.0 h1:QIw4xfpWT6GWTzaW5XEKy3HXoqrJGx1ijYHzTF0/ISU=
++ github.com/ebitengine/purego v0.10.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
++ github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
++ github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
+++github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHkI4W8=
+++github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
++ github.com/go-chi/chi/v5 v5.2.3 h1:WQIt9uxdsAbgIYgid+BpYc+liqQZGMHRaUwp0JUcvdE=
++ github.com/go-chi/chi/v5 v5.2.3/go.mod h1:L2yAIGWB3H+phAw1NxKwWM+7eUH/lU8pOMm5hHcoops=
++ github.com/go-chi/httplog/v3 v3.2.2 h1:G0oYv3YYcikNjijArHFUlqfR78cQNh9fGT43i6StqVc=
++@@ -53,30 +61,38 @@ github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
++ github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
++ github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
++ github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+++github.com/hibiken/asynq v0.26.0 h1:1Zxr92MlDnb1Zt/QR5g2vSCqUS03i95lUfqx5X7/wrw=
+++github.com/hibiken/asynq v0.26.0/go.mod h1:Qk4e57bTnWDoyJ67VkchuV6VzSM9IQW2nPvAGuDyw58=
++ github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
++ github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
++ github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
++ github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761/go.mod h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=
++-github.com/jackc/pgx/v5 v5.7.5 h1:JHGfMnQY+IEtGM63d+NGMjoRpysB2JBwDr5fsngwmJs=
++-github.com/jackc/pgx/v5 v5.7.5/go.mod h1:aruU7o91Tc2q2cFp5h4uP3f6ztExVpyVv88Xl/8Vl8M=
++ github.com/jackc/pgx/v5 v5.10.0 h1:VhSvgU2jSli8o3AqIEOTJr7rZwAEUVo4E4XhR94Zfr0=
++ github.com/jackc/pgx/v5 v5.10.0/go.mod h1:mal1tBGAFfLHvZzaYh77YS/eC6IX9OWbRV1QIIM0Jn4=
++ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=
++ github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
++ github.com/klauspost/compress v1.18.5 h1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE=
++ github.com/klauspost/compress v1.18.5/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
+++github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
+++github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
+++github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
+++github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
+++github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=
+++github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
++ github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 h1:6E+4a0GO5zZEnZ81pIr0yLvtUWk2if982qA3F3QD6H4=
++ github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0/go.mod h1:zJYVVT2jmtg6P3p1VtQj7WsuWi/y4VnjVBn7F8KPB3I=
++ github.com/magiconair/properties v1.8.10 h1:s31yESBquKXCV9a/ScB3ESkOjUYYv+X0rg8SYxI99mE=
++ github.com/magiconair/properties v1.8.10/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
++-github.com/mazzama/go-bootkit/cachekit v0.1.4 h1:ZDCcR4D+YgaMphRpXGeLie1k0YsOytuHmS9PJQbZ/5o=
++-github.com/mazzama/go-bootkit/cachekit v0.1.4/go.mod h1:5khIhq0o3HrRlw2Q5UVz2UkYiksKDJdy/nb095eT0CY=
+++github.com/mattn/go-isatty v0.0.21 h1:xYae+lCNBP7QuW4PUnNG61ffM4hVIfm+zUzDuSzYLGs=
+++github.com/mattn/go-isatty v0.0.21/go.mod h1:ZXfXG4SQHsB/w3ZeOYbR0PrPwLy+n6xiMrJlRFqopa4=
++ github.com/mazzama/go-bootkit/core v0.1.3 h1:H7DHbKKc1yAgxgzjaTGQoeNeVBFWg/EFy7zNx32YhmM=
++ github.com/mazzama/go-bootkit/core v0.1.3/go.mod h1:4W2+ukShx+AxyHHN5J++eLAG2OAIT3a2cAguD3JIXn4=
++ github.com/mazzama/go-bootkit/databasekit v0.1.2 h1:xq2i4j2JnMG4N2I1Rp8kgWWkI2Tl5rdLXje79yCKChg=
++ github.com/mazzama/go-bootkit/databasekit v0.1.2/go.mod h1:l76xFvMsEYg7uy2kaCOenifZzkPbF1go52grFGerjuM=
++ github.com/mazzama/go-bootkit/serverkit v0.1.3 h1:X40joKcWnS5UhnoaZ1wyQBYo4hO4YPEd4vBwNqd/Brk=
++ github.com/mazzama/go-bootkit/serverkit v0.1.3/go.mod h1:vGn7/9umO7xohIe2UktKw/p+7GQ3ExlX99uY3POxTdk=
+++github.com/mdelapenya/tlscert v0.2.0 h1:7H81W6Z/4weDvZBNOfQte5GpIMo0lGYEeWbkGp5LJHI=
+++github.com/mdelapenya/tlscert v0.2.0/go.mod h1:O4njj3ELLnJjGdkN7M/vIVCpZ+Cf0L6muqOG4tLSl8o=
++ github.com/mfridman/interpolate v0.0.2 h1:pnuTK7MQIxxFz1Gr+rjSIx9u7qVjf5VOoM/u6BbAxPY=
++ github.com/mfridman/interpolate v0.0.2/go.mod h1:p+7uk6oE07mpE/Ik1b8EckO0O4ZXiGAfshKBWLUM9Xg=
++ github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=
++@@ -97,6 +113,8 @@ github.com/moby/sys/userns v0.1.0 h1:tVLXkFOxVu9A64/yh59slHVv9ahO9UIev4JZusOLG/g
++ github.com/moby/sys/userns v0.1.0/go.mod h1:IHUYgu/kao6N8YZlp9Cf444ySSvCmDlmzUcYfDHOl28=
++ github.com/moby/term v0.5.2 h1:6qk3FJAFDs6i/q3W/pQ97SX192qKfZgGjCQqfCJkgzQ=
++ github.com/moby/term v0.5.2/go.mod h1:d3djjFCrjnB+fl8NJux+EJzu0msscUP+f8it8hPkFLc=
+++github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
+++github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
++ github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
++ github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
++ github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=
++@@ -109,13 +127,23 @@ github.com/pressly/goose/v3 v3.27.2 h1:FjKNzcmMdGrQlSIu5alMSmakQtJFBgtw+A0bb1p/L
++ github.com/pressly/goose/v3 v3.27.2/go.mod h1:qWW+/8dkVtJYjJrbIpwD5xxnEJTUKvxkQ9JKQp9LaIM=
++ github.com/redis/go-redis/v9 v9.17.2 h1:P2EGsA4qVIM3Pp+aPocCJ7DguDHhqrXNhVcEp4ViluI=
++ github.com/redis/go-redis/v9 v9.17.2/go.mod h1:u410H11HMLoB+TP67dz8rL9s6QW2j76l0//kSOd3370=
+++github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
+++github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
+++github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
+++github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=
+++github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
+++github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
++ github.com/sethvargo/go-retry v0.3.0 h1:EEt31A35QhrcRZtrYFDTBg91cqZVnFL2navjDrah2SE=
++ github.com/sethvargo/go-retry v0.3.0/go.mod h1:mNX17F0C/HguQMyMyJxcnU471gOZGxCLyYaFyAZraas=
++ github.com/shirou/gopsutil/v4 v4.26.3 h1:2ESdQt90yU3oXF/CdOlRCJxrP+Am1aBYubTMTfxJ1qc=
++ github.com/shirou/gopsutil/v4 v4.26.3/go.mod h1:LZ6ewCSkBqUpvSOf+LsTGnRinC6iaNUNMGBtDkJBaLQ=
++ github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
++ github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
+++github.com/spf13/cast v1.10.0 h1:h2x0u2shc1QuLHfxi+cTJvs30+ZAHOGRic8uyGTDWxY=
+++github.com/spf13/cast v1.10.0/go.mod h1:jNfB8QC9IA6ZuY2ZjDp0KtFO2LZZlg4S/7bzP6qqeHo=
++ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+++github.com/stretchr/objx v0.5.3 h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=
+++github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=
++ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
++ github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
++ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
++@@ -132,8 +160,6 @@ github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo
++ github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
++ go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
++ go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
++-go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0 h1:sbiXRNDSWJOTobXh5HyQKjq6wUC5tNybqjIqDpAY4CU=
++-go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0/go.mod h1:69uWxva0WgAA/4bu2Yy70SLDBwZXuQ6PbBpbsa5iZrQ=
++ go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 h1:CqXxU8VOmDefoh0+ztfGaymYbhdB/tT3zs79QaZTNGY=
++ go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0/go.mod h1:BuhAPThV8PBHBvg8ZzZ/Ok3idOdhWIodywz2xEcRbJo=
++ go.opentelemetry.io/otel v1.44.0 h1:JjwHmHpA4iZ3wBxluu2fbbE7j4kqlE8jXyAyPXH7HqU=
++@@ -152,12 +178,8 @@ go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
++ go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
++ go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=
++ go.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN80Y=
++-golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
++-golang.org/x/crypto v0.51.0/go.mod h1:8AdwkbraGNABw2kOX6YFPs3WM22XqI4EXEd8g+x7Oc8=
++ golang.org/x/crypto v0.52.0 h1:RMs7fP2rXdep0CftQlK8Uf+kibLm7qkCcradZWYz988=
++ golang.org/x/crypto v0.52.0/go.mod h1:1QgfPxDqh0T2M/elOJtp9RvuR95kVjir0e6/BvEmGbc=
++-golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
++-golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++ golang.org/x/sync v0.21.0 h1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=
++ golang.org/x/sync v0.21.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++ golang.org/x/sys v0.0.0-20190916202348-b4ddaad3f8a3/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
++@@ -165,10 +187,30 @@ golang.org/x/sys v0.0.0-20201204225414-ed752295db88/go.mod h1:h1NjWce9XRLGQEsW7w
++ golang.org/x/sys v0.0.0-20210616094352-59db8d763f22/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
++ golang.org/x/sys v0.45.0 h1:dO4czNzziLiiXplLQgBCEpCvXQ3dnkn0SdaZSYdQ+FY=
++ golang.org/x/sys v0.45.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+++golang.org/x/term v0.43.0 h1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=
+++golang.org/x/term v0.43.0/go.mod h1:lrhlHNdQJHO+1qVYiHfFKVuVioJIheAc3fBSMFYEIsk=
++ golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++ golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
+++golang.org/x/time v0.14.0 h1:MRx4UaLrDotUKUdCIqzPC48t1Y9hANFKIRpNx+Te8PI=
+++golang.org/x/time v0.14.0/go.mod h1:eL/Oa2bBBK0TkX57Fyni+NgnyQQN4LitPmob2Hjnqw4=
++ golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
+++google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+++google.golang.org/protobuf v1.36.11/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
++ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+++gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
+++gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
++ gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
++ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+++gotest.tools/v3 v3.5.2 h1:7koQfIKdy+I8UTetycgUqXWSDwpgv193Ka+qRsmBY8Q=
+++gotest.tools/v3 v3.5.2/go.mod h1:LtdLGcnqToBH83WByAAi/wiwSFCArdFIUV/xxN4pcjA=
+++modernc.org/libc v1.73.4 h1:+ra4Ui8ngyt8HDcO1FTDPWlkAh6yOdaO2yAoh8MddQA=
+++modernc.org/libc v1.73.4/go.mod h1:DXZ3eO8qMCNn2SnmTNCiC71nJ9Rcq3PsnpU6Vc4rWK8=
+++modernc.org/mathutil v1.7.1 h1:GCZVGXdaN8gTqB1Mf/usp1Y/hSqgI2vAGGP4jZMCxOU=
+++modernc.org/mathutil v1.7.1/go.mod h1:4p5IwJITfppl0G4sUEDtCr4DthTaT47/N3aT6MhfgJg=
+++modernc.org/memory v1.11.0 h1:o4QC8aMQzmcwCK3t3Ux/ZHmwFPzE6hf2Y5LbkRs+hbI=
+++modernc.org/memory v1.11.0/go.mod h1:/JP4VbVC+K5sU2wZi9bHoq2MAkCnrt2r98UGeSK7Mjw=
+++modernc.org/sqlite v1.53.0 h1:20WG8N9q4ji/dEqGk4uiI0c6OPjSeLTNYGFCc3+7c1M=
+++modernc.org/sqlite v1.53.0/go.mod h1:xoEpOIpGrgT48H5iiyt/YXPCZPEzlfmfFwtk8Lklw8s=
+++pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
+++pgregory.net/rapid v1.2.0/go.mod h1:PY5XlDGj0+V1FCq0o192FdRhpKHGTRIWBgqjDBTrq04=
++diff --git a/examples/orders/handler_test.go b/examples/orders/handler_test.go
++index d99ecf1..d9f58f6 100644
++--- a/examples/orders/handler_test.go
+++++ b/examples/orders/handler_test.go
++@@ -71,7 +71,7 @@ func (s *OrdersSuite) SetupSuite() {
++ 
++ 	// Wire the domain exactly as main does, over a provider backed by the pool.
++ 	logger := slog.New(slog.NewTextHandler(&discardWriter{}, nil))
++-	txManager := databasekit.NewTxManager(lazyPoolProvider{pool: func() *pgxpool.Pool { return pool }})
+++	txManager := databasekit.NewTxManager(pool)
++ 	s.cache = memcache.New()
++ 	service := NewOrderService(
++ 		txManager,
++diff --git a/examples/orders/main.go b/examples/orders/main.go
++index 1404959..8e99101 100644
++--- a/examples/orders/main.go
+++++ b/examples/orders/main.go
++@@ -7,11 +7,12 @@ import (
++ 	"os"
++ 	"time"
++ 
++-	"github.com/go-chi/chi/v5"
+++	"github.com/hibiken/asynq"
++ 	"github.com/mazzama/go-bootkit/cachekit"
++ 	"github.com/mazzama/go-bootkit/core"
++ 	"github.com/mazzama/go-bootkit/databasekit"
++ 	"github.com/mazzama/go-bootkit/serverkit"
+++	"github.com/mazzama/go-bootkit/workerkit"
++ 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
++ )
++ 
++@@ -77,9 +78,22 @@ func run() error {
++ 	service := NewOrderService(txManager, productRepo, orderRepo, cache, logger)
++ 	handler := NewHandler(service, logger)
++ 
+++	// Set up background worker (client + server)
+++	redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr, Password: cfg.RedisPassword}
+++	asyncClient := workerkit.NewAsynqClient("notification-client", redisOpt)
+++	asyncServer := workerkit.NewAsynqServer(
+++		"notification-worker",
+++		redisOpt,
+++		asynq.Config{Concurrency: 5},
+++	)
+++
+++	// Register handlers
+++	processor := NewNotificationProcessor(logger)
+++	asyncServer.Mux().HandleFunc("notification:send", processor.Process)
+++
++ 	runner := core.NewApplicationRunner(
++ 		core.WithLogger(logger),
++-		core.WithServices(db, cache),
+++		core.WithServices(db, cache, asyncClient, asyncServer),
++ 	)
++ 
++ 	// 6. HTTP server. NewDefaultHandler gives a chi router with health probes,
++@@ -88,7 +102,7 @@ func run() error {
++ 	//    middleware. Wrapping at the server level (rather than router.Use) avoids
++ 	//    chi's "middleware after routes" panic, since the default handler has
++ 	//    already registered its health routes.
++-	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger).(*chi.Mux)
+++	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
++ 	handler.Routes(router)
++ 
++ 	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")
++diff --git a/examples/orders/repository.go b/examples/orders/repository.go
++index 1e1fc1e..df570dc 100644
++--- a/examples/orders/repository.go
+++++ b/examples/orders/repository.go
++@@ -13,16 +13,16 @@ import (
++ // Querier from the context on every call, so the same methods work both inside
++ // and outside a TxManager transaction.
++ type pgProductRepository struct {
++-	tx *databasekit.TxManager
+++	resolver databasekit.QuerierResolver
++ }
++ 
++-// NewProductRepository builds a ProductRepository over the given TxManager.
++-func NewProductRepository(tx *databasekit.TxManager) ProductRepository {
++-	return &pgProductRepository{tx: tx}
+++// NewProductRepository builds a ProductRepository over the given QuerierResolver.
+++func NewProductRepository(resolver databasekit.QuerierResolver) ProductRepository {
+++	return &pgProductRepository{resolver: resolver}
++ }
++ 
++ func (r *pgProductRepository) Create(ctx context.Context, name string, price, stock int64) (Product, error) {
++-	q := r.tx.QuerierFromContext(ctx)
+++	q := r.resolver.QuerierFromContext(ctx)
++ 
++ 	var p Product
++ 	err := q.QueryRow(ctx,
++@@ -38,12 +38,12 @@ func (r *pgProductRepository) Create(ctx context.Context, name string, price, st
++ }
++ 
++ func (r *pgProductRepository) GetByID(ctx context.Context, id int64) (Product, error) {
++-	q := r.tx.QuerierFromContext(ctx)
+++	q := r.resolver.QuerierFromContext(ctx)
++ 	return scanProduct(ctx, q, id, false)
++ }
++ 
++ func (r *pgProductRepository) GetForUpdate(ctx context.Context, id int64) (Product, error) {
++-	q := r.tx.QuerierFromContext(ctx)
+++	q := r.resolver.QuerierFromContext(ctx)
++ 	return scanProduct(ctx, q, id, true)
++ }
++ 
++@@ -65,7 +65,7 @@ func scanProduct(ctx context.Context, q databasekit.Querier, id int64, forUpdate
++ }
++ 
++ func (r *pgProductRepository) DecrementStock(ctx context.Context, id, quantity int64) error {
++-	q := r.tx.QuerierFromContext(ctx)
+++	q := r.resolver.QuerierFromContext(ctx)
++ 	_, err := q.Exec(ctx,
++ 		`UPDATE products SET stock = stock - $1 WHERE id = $2`,
++ 		quantity, id,
++@@ -78,16 +78,16 @@ func (r *pgProductRepository) DecrementStock(ctx context.Context, id, quantity i
++ 
++ // pgOrderRepository is a Postgres-backed OrderRepository.
++ type pgOrderRepository struct {
++-	tx *databasekit.TxManager
+++	resolver databasekit.QuerierResolver
++ }
++ 
++-// NewOrderRepository builds an OrderRepository over the given TxManager.
++-func NewOrderRepository(tx *databasekit.TxManager) OrderRepository {
++-	return &pgOrderRepository{tx: tx}
+++// NewOrderRepository builds an OrderRepository over the given QuerierResolver.
+++func NewOrderRepository(resolver databasekit.QuerierResolver) OrderRepository {
+++	return &pgOrderRepository{resolver: resolver}
++ }
++ 
++ func (r *pgOrderRepository) Create(ctx context.Context, productID, quantity, total int64) (Order, error) {
++-	q := r.tx.QuerierFromContext(ctx)
+++	q := r.resolver.QuerierFromContext(ctx)
++ 
++ 	var o Order
++ 	err := q.QueryRow(ctx,
++@@ -103,7 +103,7 @@ func (r *pgOrderRepository) Create(ctx context.Context, productID, quantity, tot
++ }
++ 
++ func (r *pgOrderRepository) GetByID(ctx context.Context, id int64) (Order, error) {
++-	q := r.tx.QuerierFromContext(ctx)
+++	q := r.resolver.QuerierFromContext(ctx)
++ 
++ 	var o Order
++ 	err := q.QueryRow(ctx,
++diff --git a/examples/orders/service.go b/examples/orders/service.go
++index d8144a3..c6bd0f5 100644
++--- a/examples/orders/service.go
+++++ b/examples/orders/service.go
++@@ -2,7 +2,6 @@ package main
++ 
++ import (
++ 	"context"
++-	"encoding/json"
++ 	"fmt"
++ 	"log/slog"
++ 	"time"
++@@ -56,14 +55,13 @@ func (s *OrderService) CreateProduct(ctx context.Context, name string, price, st
++ func (s *OrderService) GetProduct(ctx context.Context, id int64) (Product, error) {
++ 	key := productCacheKey(id)
++ 
++-	if cached, err := s.cache.Get(ctx, key); err == nil {
++-		var p Product
++-		if unmarshalErr := json.Unmarshal([]byte(cached), &p); unmarshalErr == nil {
++-			s.logger.DebugContext(ctx, "product cache hit", "product_id", id)
++-			return p, nil
++-		}
++-		// A malformed cache entry is treated as a miss.
++-		s.logger.WarnContext(ctx, "discarding malformed cache entry", "product_id", id)
+++	var p Product
+++	if err := s.cache.Get(ctx, key, &p); err == nil {
+++		s.logger.DebugContext(ctx, "product cache hit", "product_id", id)
+++		return p, nil
+++	} else if err.Error() != "redis: nil" && err.Error() != "cache miss: "+key {
+++		// A malformed cache entry is logged, but we fall back to the DB.
+++		s.logger.WarnContext(ctx, "cache error or malformed entry", "product_id", id, "error", err)
++ 	}
++ 
++ 	p, err := s.products.GetByID(ctx, id)
++@@ -71,11 +69,9 @@ func (s *OrderService) GetProduct(ctx context.Context, id int64) (Product, error
++ 		return Product{}, err
++ 	}
++ 
++-	if encoded, err := json.Marshal(p); err == nil {
++-		if setErr := s.cache.Set(ctx, key, encoded, productCacheTTL); setErr != nil {
++-			// Caching is best-effort; a failure to populate must not fail the read.
++-			s.logger.WarnContext(ctx, "failed to populate product cache", "product_id", id, "error", setErr)
++-		}
+++	if setErr := s.cache.Set(ctx, key, p, productCacheTTL); setErr != nil {
+++		// Caching is best-effort; a failure to populate must not fail the read.
+++		s.logger.WarnContext(ctx, "failed to populate product cache", "product_id", id, "error", setErr)
++ 	}
++ 
++ 	return p, nil
++diff --git a/serverkit/server.go b/serverkit/server.go
++index a870525..4e50ca8 100644
++--- a/serverkit/server.go
+++++ b/serverkit/server.go
++@@ -114,7 +114,27 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
++ 	return srv, nil
++ }
++ 
++-func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger) http.Handler {
+++type RouterOptions struct {
+++	Timeout time.Duration
+++}
+++
+++type RouterOption func(*RouterOptions)
+++
+++// WithRouterTimeout sets the request timeout middleware duration.
+++func WithRouterTimeout(d time.Duration) RouterOption {
+++	return func(o *RouterOptions) {
+++		if d > 0 {
+++			o.Timeout = d
+++		}
+++	}
+++}
+++
+++func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger, opts ...RouterOption) chi.Router {
+++	options := RouterOptions{Timeout: 60 * time.Second}
+++	for _, opt := range opts {
+++		opt(&options)
+++	}
+++
++ 	router := chi.NewRouter()
++ 
++ 	if logger == nil {
++@@ -131,7 +151,7 @@ func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger) http.H
++ 	router.Use(middleware.RequestID)
++ 	router.Use(middleware.RealIP)
++ 	router.Use(middleware.Recoverer)
++-	router.Use(middleware.Timeout(60 * time.Second))
+++	router.Use(middleware.Timeout(options.Timeout))
++ 
++ 	// Setup health routes if aggregator is provided
++ 	if health != nil {
++diff --git a/workerkit/CONTEXT.md b/workerkit/CONTEXT.md
++new file mode 100644
++index 0000000..52f9dee
++--- /dev/null
+++++ b/workerkit/CONTEXT.md
++@@ -0,0 +1,70 @@
+++# workerkit
+++
+++The `workerkit` module integrates `hibiken/asynq` (a Redis-backed background job processor) with the Bootkit framework. It splits Asynq into two `core.Component` implementations: `AsynqClient` for enqueueing jobs, and `AsynqServer` for processing jobs.
+++
+++## Architecture
+++
+++By separating Client and Server into two components:
+++1. **HTTP Nodes** can embed just the `AsynqClient` component. This saves resources as they don't spin up worker goroutines.
+++2. **Worker Nodes** can embed just the `AsynqServer` component.
+++3. **Monoliths** can embed both.
+++
+++Both components integrate with `core.Lifecycle` to honor graceful shutdown and context timeouts, and with `healthkit` to report liveness/readiness.
+++
+++## Usage
+++
+++### 1. Initialize the Components
+++
+++```go
+++import (
+++	"github.com/hibiken/asynq"
+++	"github.com/mazzama/go-bootkit/workerkit"
+++)
+++
+++// Configure Redis connection
+++redisOpt := asynq.RedisClientOpt{Addr: "localhost:6379"}
+++
+++// Create Client for enqueueing tasks
+++client := workerkit.NewAsynqClient("asynq-client", redisOpt)
+++
+++// Create Server for processing tasks
+++server := workerkit.NewAsynqServer(
+++	"asynq-server",
+++	redisOpt,
+++	asynq.Config{Concurrency: 20},
+++)
+++
+++// Define your task handlers
+++server.Mux().HandleFunc("email:deliver", HandleEmailDelivery)
+++
+++// Pass to the application runner
+++runner := core.NewApplicationRunner(
+++	core.WithServices(client, server),
+++)
+++```
+++
+++### 2. Enqueue Tasks
+++
+++Use the client component (which behaves like `asynq.Client`) to enqueue tasks asynchronously:
+++
+++```go
+++task := asynq.NewTask("email:deliver", []byte(`{"to": "user@example.com"}`))
+++
+++// EnqueueContext respects the client's Lifecycle Readiness state
+++info, err := client.EnqueueContext(ctx, task)
+++```
+++
+++### 3. Process Tasks
+++
+++The handler function simply needs to match `asynq`'s signature:
+++
+++```go
+++func HandleEmailDelivery(ctx context.Context, t *asynq.Task) error {
+++    // Deserialize payload and do work
+++    return nil // returning an error automatically triggers retries
+++}
+++```
+++
+++## Configuration
+++
+++`NewAsynqServer` accepts `asynq.Config` directly, which allows you to configure dead-letter queues, strict priority queues, and custom retry delays natively without wrapping abstractions.
++diff --git a/workerkit/client.go b/workerkit/client.go
++new file mode 100644
++index 0000000..879fa40
++--- /dev/null
+++++ b/workerkit/client.go
++@@ -0,0 +1,62 @@
+++package workerkit
+++
+++import (
+++	"context"
+++	"fmt"
+++
+++	"github.com/hibiken/asynq"
+++	"github.com/mazzama/go-bootkit/core"
+++	"github.com/mazzama/go-bootkit/core/healthkit"
+++)
+++
+++type AsynqClient struct {
+++	core.Lifecycle
+++	name   string
+++	client *asynq.Client
+++}
+++
+++func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
+++	client := asynq.NewClient(redisOpt)
+++
+++	c := &AsynqClient{
+++		name:   name,
+++		client: client,
+++	}
+++
+++	c.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
+++		// Nothing to start for the client, just return a closure to close it
+++		return func(shutdownCtx context.Context) error {
+++			return c.client.Close()
+++		}, nil
+++	})
+++
+++	return c
+++}
+++
+++func (c *AsynqClient) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+++	select {
+++	case <-c.Ready():
+++	case <-context.Background().Done():
+++		return nil, fmt.Errorf("client not ready")
+++	}
+++	return c.client.Enqueue(task, opts...)
+++}
+++
+++func (c *AsynqClient) EnqueueContext(ctx context.Context, task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+++	select {
+++	case <-c.Ready():
+++	case <-ctx.Done():
+++		return nil, fmt.Errorf("client not ready: %w", ctx.Err())
+++	}
+++	return c.client.EnqueueContext(ctx, task, opts...)
+++}
+++
+++func (c *AsynqClient) Name() string {
+++	return c.name
+++}
+++
+++func (c *AsynqClient) HealthChecks() []healthkit.Check {
+++	return asynqHealthChecks(c.name, c.Ready())
+++}
+++
+++var _ core.Component = (*AsynqClient)(nil)
++diff --git a/workerkit/go.mod b/workerkit/go.mod
++new file mode 100644
++index 0000000..e38b7d2
++--- /dev/null
+++++ b/workerkit/go.mod
++@@ -0,0 +1,21 @@
+++module github.com/mazzama/go-bootkit/workerkit
+++
+++go 1.26.5
+++
+++require (
+++	github.com/hibiken/asynq v0.26.0
+++	github.com/mazzama/go-bootkit/core v0.1.3
+++)
+++
+++require (
+++	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+++	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+++	github.com/google/uuid v1.6.0 // indirect
+++	github.com/redis/go-redis/v9 v9.14.1 // indirect
+++	github.com/robfig/cron/v3 v3.0.1 // indirect
+++	github.com/spf13/cast v1.10.0 // indirect
+++	golang.org/x/sync v0.16.0 // indirect
+++	golang.org/x/sys v0.37.0 // indirect
+++	golang.org/x/time v0.14.0 // indirect
+++	google.golang.org/protobuf v1.36.10 // indirect
+++)
++diff --git a/workerkit/go.sum b/workerkit/go.sum
++new file mode 100644
++index 0000000..c665c43
++--- /dev/null
+++++ b/workerkit/go.sum
++@@ -0,0 +1,40 @@
+++github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
+++github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
+++github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
+++github.com/bsm/gomega v1.27.10/go.mod h1:JyEr/xRbxbtgWNi8tIEVPUYZ5Dzef52k01W3YH0H+O0=
+++github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
+++github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+++github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f h1:lO4WD4F/rVNCu3HqELle0jiPLLBs70cWOduZpkS1E78=
+++github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f/go.mod h1:cuUVRXasLTGF7a8hSLbxyZXjz+1KgoB3wDUb6vlszIc=
+++github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHkI4W8=
+++github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
+++github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+++github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
+++github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+++github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+++github.com/hibiken/asynq v0.26.0 h1:1Zxr92MlDnb1Zt/QR5g2vSCqUS03i95lUfqx5X7/wrw=
+++github.com/hibiken/asynq v0.26.0/go.mod h1:Qk4e57bTnWDoyJ67VkchuV6VzSM9IQW2nPvAGuDyw58=
+++github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
+++github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
+++github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
+++github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
+++github.com/mazzama/go-bootkit/core v0.1.3 h1:H7DHbKKc1yAgxgzjaTGQoeNeVBFWg/EFy7zNx32YhmM=
+++github.com/mazzama/go-bootkit/core v0.1.3/go.mod h1:4W2+ukShx+AxyHHN5J++eLAG2OAIT3a2cAguD3JIXn4=
+++github.com/redis/go-redis/v9 v9.14.1 h1:nDCrEiJmfOWhD76xlaw+HXT0c9hfNWeXgl0vIRYSDvQ=
+++github.com/redis/go-redis/v9 v9.14.1/go.mod h1:huWgSWd8mW6+m0VPhJjSSQ+d6Nh1VICQ6Q5lHuCH/Iw=
+++github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
+++github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=
+++github.com/rogpeppe/go-internal v1.9.0 h1:73kH8U+JUqXU8lRuOHeVHaa/SZPifC7BkcraZVejAe8=
+++github.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=
+++github.com/spf13/cast v1.10.0 h1:h2x0u2shc1QuLHfxi+cTJvs30+ZAHOGRic8uyGTDWxY=
+++github.com/spf13/cast v1.10.0/go.mod h1:jNfB8QC9IA6ZuY2ZjDp0KtFO2LZZlg4S/7bzP6qqeHo=
+++go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
+++go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
+++golang.org/x/sync v0.16.0 h1:ycBJEhp9p4vXvUZNszeOq0kGTPghopOL8q0fq3vstxw=
+++golang.org/x/sync v0.16.0/go.mod h1:1dzgHSNfp02xaA81J2MS99Qcpr2w7fw1gpm99rleRqA=
+++golang.org/x/sys v0.37.0 h1:fdNQudmxPjkdUTPnLn5mdQv7Zwvbvpaxqs831goi9kQ=
+++golang.org/x/sys v0.37.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+++golang.org/x/time v0.14.0 h1:MRx4UaLrDotUKUdCIqzPC48t1Y9hANFKIRpNx+Te8PI=
+++golang.org/x/time v0.14.0/go.mod h1:eL/Oa2bBBK0TkX57Fyni+NgnyQQN4LitPmob2Hjnqw4=
+++google.golang.org/protobuf v1.36.10 h1:AYd7cD/uASjIL6Q9LiTjz8JLcrh/88q5UObnmY3aOOE=
+++google.golang.org/protobuf v1.36.10/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
++diff --git a/workerkit/health.go b/workerkit/health.go
++new file mode 100644
++index 0000000..6b8c2d7
++--- /dev/null
+++++ b/workerkit/health.go
++@@ -0,0 +1,18 @@
+++package workerkit
+++
+++import (
+++	"context"
+++
+++	"github.com/mazzama/go-bootkit/core/healthkit"
+++)
+++
+++func asynqHealthChecks(name string, ready <-chan struct{}) []healthkit.Check {
+++	return healthkit.StandardChecks(name, func(ctx context.Context) error {
+++		select {
+++		case <-ready:
+++			return nil
+++		case <-ctx.Done():
+++			return ctx.Err()
+++		}
+++	})
+++}
++diff --git a/workerkit/server.go b/workerkit/server.go
++new file mode 100644
++index 0000000..dd2ab30
++--- /dev/null
+++++ b/workerkit/server.go
++@@ -0,0 +1,74 @@
+++package workerkit
+++
+++import (
+++	"context"
+++	"fmt"
+++	"log/slog"
+++
+++	"github.com/hibiken/asynq"
+++	"github.com/mazzama/go-bootkit/core"
+++	"github.com/mazzama/go-bootkit/core/healthkit"
+++)
+++
+++type AsynqServer struct {
+++	core.Lifecycle
+++	name   string
+++	server *asynq.Server
+++	mux    *asynq.ServeMux
+++	logger *slog.Logger
+++}
+++
+++func NewAsynqServer(name string, redisOpt asynq.RedisConnOpt, cfg asynq.Config) *AsynqServer {
+++	server := asynq.NewServer(redisOpt, cfg)
+++	mux := asynq.NewServeMux()
+++
+++	s := &AsynqServer{
+++		name:   name,
+++		server: server,
+++		mux:    mux,
+++		logger: slog.Default(),
+++	}
+++
+++	s.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
+++		if err := s.server.Start(s.mux); err != nil {
+++			return nil, fmt.Errorf("failed to start asynq server: %w", err)
+++		}
+++
+++		return func(shutdownCtx context.Context) error {
+++			// server.Shutdown() blocks until workers finish, so we can wrap it in a goroutine
+++			// to respect the context timeout, but asynq.Server's Shutdown already has its own
+++			// internal timeouts based on StrictPriority etc. We'll simply call it in a goroutine
+++			// and select on context.
+++			done := make(chan struct{})
+++			go func() {
+++				s.server.Shutdown()
+++				close(done)
+++			}()
+++
+++			select {
+++			case <-done:
+++				return nil
+++			case <-shutdownCtx.Done():
+++				// Stop forces shutdown
+++				s.server.Stop()
+++				return fmt.Errorf("asynq server shutdown timed out: %w", shutdownCtx.Err())
+++			}
+++		}, nil
+++	})
+++
+++	return s
+++}
+++
+++func (s *AsynqServer) Mux() *asynq.ServeMux {
+++	return s.mux
+++}
+++
+++func (s *AsynqServer) Name() string {
+++	return s.name
+++}
+++
+++func (s *AsynqServer) HealthChecks() []healthkit.Check {
+++	return asynqHealthChecks(s.name, s.Ready())
+++}
+++
+++var _ core.Component = (*AsynqServer)(nil)
+diff --git a/docs/agents/specs/architecture_deepening.md b/docs/agents/specs/architecture_deepening.md
+new file mode 100644
+index 0000000..c463049
+--- /dev/null
++++ b/docs/agents/specs/architecture_deepening.md
+@@ -0,0 +1,42 @@
++## Problem Statement
++
++The go-bootkit architecture contains several shallow modules and concrete couplings that hinder testability and leak implementation details. Repositories depend on a concrete `TxManager` (making unit tests difficult without Docker), the router is exposed as an interface that lies (`http.Handler` when callers expect `*chi.Mux`), the cache interface is too shallow and leaks codec logic into callers, the logger is a pass-through that forces callers to wire resource attributes manually, and the application runner lacks isolated shutdown logic for testing.
++
++## Solution
++
++Deepen the architectural seams across the core and kit packages. Abstract `TxManager` into a `QuerierResolver` port, return an honest `chi.Router` from `serverkit`, push JSON marshaling down into `cachekit.Cache`, natively inject base resource attributes into `core.Logger`, and isolate `ApplicationRunner` lifecycle phases into unexported orchestrator methods.
++
++## User Stories
++
++1. As a developer writing tests, I want repositories to depend on a `QuerierResolver` interface, so that I can unit test domain logic using a mock or in-memory querier without requiring a live Postgres database via testcontainers.
++2. As a framework consumer, I want `serverkit.NewDefaultHandler` to return a `chi.Router`, so that I don't have to unsafely type-assert the return value to mount my application routes.
++3. As a framework consumer, I want to configure the router timeout via a functional option, so that I can tune request timeouts for my specific service load rather than relying on a hardcoded 60s timeout.
++4. As a framework consumer, I want `cachekit.Cache.Get` and `Set` to handle encoding, so that I don't have to write repetitive `json.Marshal`/`Unmarshal` boilerplate in every service method that touches the cache.
++5. As an operator reviewing logs, I want trace IDs and base resource attributes (`service.name`, `service.version`, `deployment.environment`) automatically injected at the root of every log record, so that I can correlate logs efficiently across services and environments.
++6. As a framework consumer, I want to configure base logger attributes using native functional options on `core.NewLogger`, so that I don't need to manually construct and wrap custom handlers.
++7. As a framework maintainer, I want the `ApplicationRunner`'s shutdown logic extracted into a dedicated orchestrator method, so that I can easily test the shutdown budget and ordering logic in isolation.
++
++## Implementation Decisions
++
++- **Modules Modified**: `core`, `databasekit`, `serverkit`, `cachekit`, and example services (`examples/orders`).
++- **Database Seam**: Introduced `QuerierResolver` interface in `databasekit`. Modified repositories in `examples/orders` to depend on `QuerierResolver` instead of the concrete `*TxManager`. The `*pgxpool.Pool` natively implements `TxProvider`, so bespoke lazy adapters were removed from tests.
++- **Router Seam**: Updated `serverkit.NewDefaultHandler` to return `chi.Router` and exposed `WithRouterTimeout` as a functional option.
++- **Cache Seam**: Deepened `cachekit.Cache` interface to `Get(ctx, key, dest any)` and `Set(ctx, key, value any)`. Modified `RedisCache` and `MemoryCache` implementations to own the JSON codec, eliminating boilerplate in `OrderService`.
++- **Logger Seam**: Extended `core.LoggerConfig` to accept `ServiceName`, `Version`, and `Environment`. Updated `NewLogger` to construct these attributes and inject them into the `TraceHandler` directly.
++- **Runner Seam**: Extracted `healthWiring`, `startSupervisor`, and `shutdownOrchestrator` methods in `core.ApplicationRunner`.
++
++## Testing Decisions
++
++- Good tests should verify external behavior rather than implementation details.
++- Repositories can now be unit tested by mocking `QuerierResolver`, skipping `testcontainers` for basic logic validation.
++- Existing tests for `serverkit` and `core` must pass without regressions.
++- Prior art: Tests in `examples/orders/handler_test.go` bind directly to a database pool instead of using bespoke lazy providers, verifying that the `TxProvider` interface correctly resolves from a live `pgxpool.Pool`.
++
++## Out of Scope
++
++- A unified configuration seam (`ConfigSource` port) is deferred until a second consumer exists (following the YAGNI principle).
++- DAG-based shutdown ordering (rejected as over-engineered; sticking to sequential shutdown for now).
++
++## Further Notes
++
++- All changes respect the "ponytail" constraints: minimizing new abstractions, keeping the shortest working diff, and avoiding unnecessary dependencies. Code is smaller, seams are deeper.
 diff --git a/examples/orders/go.mod b/examples/orders/go.mod
 index b9a0f00..761b52f 100644
 --- a/examples/orders/go.mod
@@ -388,7 +1465,7 @@ index 4897418..410f2a5 100644
 +pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
 +pgregory.net/rapid v1.2.0/go.mod h1:PY5XlDGj0+V1FCq0o192FdRhpKHGTRIWBgqjDBTrq04=
 diff --git a/examples/orders/handler_test.go b/examples/orders/handler_test.go
-index d99ecf1..d9f58f6 100644
+index d99ecf1..b0076ed 100644
 --- a/examples/orders/handler_test.go
 +++ b/examples/orders/handler_test.go
 @@ -71,7 +71,7 @@ func (s *OrdersSuite) SetupSuite() {
@@ -400,11 +1477,90 @@ index d99ecf1..d9f58f6 100644
  	s.cache = memcache.New()
  	service := NewOrderService(
  		txManager,
+@@ -122,7 +122,7 @@ func (s *OrdersSuite) TestCreateProduct() {
+ 	resp := s.doJSON(http.MethodPost, "/products", createProductRequest{
+ 		Name: "Widget", PriceCents: 1500, Stock: 10,
+ 	})
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Then the response is 201 with the created product
+ 	s.Equal(http.StatusCreated, resp.StatusCode)
+@@ -141,7 +141,7 @@ func (s *OrdersSuite) TestCreateProductValidation() {
+ 	// Given a payload missing the required name
+ 	// When it is posted
+ 	resp := s.doJSON(http.MethodPost, "/products", createProductRequest{PriceCents: 100, Stock: 1})
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Then the response is 400 and nothing is written (dbcheck)
+ 	s.Equal(http.StatusBadRequest, resp.StatusCode)
+@@ -154,7 +154,7 @@ func (s *OrdersSuite) TestGetProductCachesOnMiss() {
+ 
+ 	// When it is fetched (cache miss -> Postgres -> populate)
+ 	resp := s.doJSON(http.MethodGet, fmt.Sprintf("/products/%d", id), nil)
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Then the response is 200 and the cache now holds the product
+ 	s.Equal(http.StatusOK, resp.StatusCode)
+@@ -166,7 +166,7 @@ func (s *OrdersSuite) TestGetProductNotFound() {
+ 	// Given no product with this id
+ 	// When it is fetched
+ 	resp := s.doJSON(http.MethodGet, "/products/999", nil)
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Then the response is 404
+ 	s.Equal(http.StatusNotFound, resp.StatusCode)
+@@ -176,13 +176,13 @@ func (s *OrdersSuite) TestCreateOrderDecrementsStockAndInvalidatesCache() {
+ 	// Given a product with stock 10, already cached by a prior read
+ 	id := s.seedProduct("Widget", 1500, 10)
+ 	getResp := s.doJSON(http.MethodGet, fmt.Sprintf("/products/%d", id), nil)
+-	getResp.Body.Close()
++	_ = getResp.Body.Close()
+ 	exists, _ := s.cache.Exists(s.ctx, productCacheKey(id))
+ 	s.Require().True(exists)
+ 
+ 	// When an order for 3 units is placed
+ 	resp := s.doJSON(http.MethodPost, "/orders", createOrderRequest{ProductID: id, Quantity: 3})
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Then the response is 201 with the computed total
+ 	s.Equal(http.StatusCreated, resp.StatusCode)
+@@ -206,7 +206,7 @@ func (s *OrdersSuite) TestCreateOrderInsufficientStockRollsBack() {
+ 
+ 	// When an order for 5 units is placed
+ 	resp := s.doJSON(http.MethodPost, "/orders", createOrderRequest{ProductID: id, Quantity: 5})
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Then the response is 409 Conflict
+ 	s.Equal(http.StatusConflict, resp.StatusCode)
+@@ -223,11 +223,11 @@ func (s *OrdersSuite) TestGetOrderReturnsPersistedOrder() {
+ 	createResp := s.doJSON(http.MethodPost, "/orders", createOrderRequest{ProductID: id, Quantity: 2})
+ 	var created Order
+ 	s.decode(createResp, &created)
+-	createResp.Body.Close()
++	_ = createResp.Body.Close()
+ 
+ 	// When the order is fetched by id
+ 	resp := s.doJSON(http.MethodGet, fmt.Sprintf("/orders/%d", created.ID), nil)
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Then the response is 200 with the same order
+ 	s.Equal(http.StatusOK, resp.StatusCode)
 diff --git a/examples/orders/main.go b/examples/orders/main.go
-index 1404959..8e99101 100644
+index 1404959..723aed9 100644
 --- a/examples/orders/main.go
 +++ b/examples/orders/main.go
-@@ -7,11 +7,12 @@ import (
+@@ -3,15 +3,15 @@ package main
+ import (
+ 	"context"
+ 	"log/slog"
+-	"net/http"
  	"os"
  	"time"
  
@@ -418,7 +1574,19 @@ index 1404959..8e99101 100644
  	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
  )
  
-@@ -77,9 +78,22 @@ func run() error {
+@@ -34,7 +34,10 @@ func run() error {
+ 	// 2. Trace-correlated logger. NewLogger wraps a JSON handler with the
+ 	//    TraceHandler, so any log emitted with a span in its context carries
+ 	//    trace_id/span_id.
+-	logger := core.NewLogger(core.WithLogLevel(slog.LevelInfo))
++	logger := core.NewLogger(
++		core.WithLogLevel(slog.LevelInfo),
++		core.WithServiceName(serviceName),
++	)
+ 	slog.SetDefault(logger)
+ 
+ 	// 3. OpenTelemetry tracing to stdout, so the trace IDs above are real.
+@@ -77,9 +80,22 @@ func run() error {
  	service := NewOrderService(txManager, productRepo, orderRepo, cache, logger)
  	handler := NewHandler(service, logger)
  
@@ -442,7 +1610,7 @@ index 1404959..8e99101 100644
  	)
  
  	// 6. HTTP server. NewDefaultHandler gives a chi router with health probes,
-@@ -88,7 +102,7 @@ func run() error {
+@@ -88,10 +104,10 @@ func run() error {
  	//    middleware. Wrapping at the server level (rather than router.Use) avoids
  	//    chi's "middleware after routes" panic, since the default handler has
  	//    already registered its health routes.
@@ -450,7 +1618,11 @@ index 1404959..8e99101 100644
 +	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
  	handler.Routes(router)
  
- 	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")
+-	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")
++	httpHandler := otelhttp.NewHandler(router, "http.server")
+ 	server, err := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, httpHandler, serverkit.WithLogger(logger))
+ 	if err != nil {
+ 		return err
 diff --git a/examples/orders/repository.go b/examples/orders/repository.go
 index 1e1fc1e..df570dc 100644
 --- a/examples/orders/repository.go
@@ -623,6 +1795,204 @@ index a870525..4e50ca8 100644
  
  	// Setup health routes if aggregator is provided
  	if health != nil {
+diff --git a/spec.txt b/spec.txt
+new file mode 100644
+index 0000000..b1642cc
+--- /dev/null
++++ b/spec.txt
+@@ -0,0 +1,47 @@
++title:	workerkit: async work distribution module via asynq
++state:	OPEN
++author:	mazzama (Muhammad Azzam)
++labels:	ready-for-agent
++comments:	0
++assignees:	mazzama (Muhammad Azzam)
++projects:	
++milestone:	
++issue-type:	
++parent:	
++sub-issues:	
++sub-issues-completed:	
++blocked-by:	
++blocking:	
++number:	38
++--
++## Problem Statement
++
++The framework is purely request-response. `ApplicationRunner` manages long-lived infrastructure components (`HTTPServer`, `PostgresDB`, `RedisCache`), but there is no seam for async work distribution. A B2B client submitting 1k–100k QR codes for packaging must complete the entire batch within the HTTP server's timeout window, or the request dies. Every bulk job needs a robust queue with concurrency, backpressure, retries, and graceful drain-on-stop logic.
++
++## Solution (Revised)
++
++Rather than reinventing the wheel with a custom `workerpool` and Queue abstraction, we will integrate `hibiken/asynq` (the industry standard for Redis-backed jobs in Go). 
++
++We will build a `workerkit` module that wraps `asynq` into our existing `core.Component` and `core.Lifecycle` seams. This gives us production-grade background jobs with retries, dead-letter queues, and UI monitoring out of the box, while still perfectly honoring `ApplicationRunner`'s graceful startup/shutdown and `healthkit` integration.
++
++## Architecture & Decisions
++
++### Client/Server Separation
++To allow scaling HTTP nodes and Worker nodes independently, `workerkit` will expose two separate `core.Component` implementations:
++1. `AsynqClient` - Wraps `asynq.Client`. Embedded in HTTP nodes to enqueue tasks.
++2. `AsynqServer` - Wraps `asynq.Server`. Embedded in Worker nodes to process tasks.
++
++### Seamless Lifecycle Integration
++- Both components embed `core.Lifecycle`.
++- `AsynqServer` gracefully starts up the worker pool and correctly handles shutdown (draining in-flight tasks without dropping them on `SIGTERM`).
++- Both automatically expose `Liveness` and `Readiness` checks to `healthkit`.
++
++### Functional Options
++Configuration uses functional options (e.g. `WithConcurrency`), conforming to the repository standard. An escape hatch (`WithAsynqConfig`) is provided so advanced users can access the underlying `asynq.Config` directly.
++
++### Out of Scope (For Now)
++- Embedding the `asynqmon` web UI directly into the framework. This can be run as a separate binary.
++
++## Further Notes
++Originated from the architecture review for a B2B QR-generation platform. A mid-flight pivot was made from a custom `workerpool` to `asynq` to strictly follow the "ponytail: lazy senior dev" principle: *Does an already-installed or industry-standard dependency solve it? Use it.*
++
+diff --git a/standards.txt b/standards.txt
+new file mode 100644
+index 0000000..1d23ff0
+--- /dev/null
++++ b/standards.txt
+@@ -0,0 +1,139 @@
++# CLAUDE.md
++
++This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
++
++## Project Overview
++
++Go Boot Kit is a multi-module Go library providing reusable components for building backend applications. Each module is independently versioned and can be imported separately.
++
++## Module Structure
++
++```
++core/           - Foundation module with Component interface and ApplicationRunner
++  component.go  - Component and Readyable interfaces
++  runner.go     - ApplicationRunner for orchestrating services with graceful shutdown
++  healthkit/    - Health check aggregator (Liveness, Readiness, Startup probes)
++
++cachekit/       - Redis cache component implementing core.Component
++databasekit/    - PostgreSQL component implementing core.Component
++serverkit/      - HTTP server component (chi router) implementing core.Component
++```
++
++## Key Architecture Patterns
++
++### Component Interface
++All services implement `core.Component`:
++```go
++type Component interface {
++    Name() string
++    Start(ctx context.Context) error
++    Stop(ctx context.Context) error
++}
++```
++
++Services that need startup coordination also implement `core.Readyable`:
++```go
++type Readyable interface {
++    Ready() <-chan struct{}
++}
++```
++
++### Functional Options Pattern
++All components use functional options for configuration:
++```go
++// Example: databasekit
++db, err := databasekit.NewPostgresDB(ctx,
++    databasekit.WithDBName("mydb"),
++    databasekit.WithConnectionString(connStr),
++)
++```
++
++### Application Runner
++The `core.ApplicationRunner` orchestrates multiple services:
++- Starts all services concurrently using errgroup
++- Supports start deadlines for Readyable components
++- Handles graceful shutdown on SIGINT/SIGTERM
++- Runs Stop() on all services in parallel during shutdown
++
++## Commands
++
++```bash
++# Build a specific module
++go build ./...
++
++# Run tests for a module
++go test ./...
++
++# Run tests with verbose output
++go test -v ./...
++
++# Run tests for a specific package
++go test -v ./healthkit
++
++# Tidy dependencies (run in each module directory)
++go mod tidy
++```
++
++## Adding New Components
++
++1. Create a new directory for the component (e.g., `newkit/`)
++2. Create a `go.mod` with module path `github.com/mazzama/go-bootkit/newkit`
++3. Import `github.com/mazzama/go-bootkit/core` for the Component interface
++4. Implement the `Component` interface
++5. Optionally implement `Readyable` for startup coordination
++6. Provide `HealthChecks() []healthkit.Check` method for health integration
++
++## Dependencies
++
++- `github.com/go-chi/chi/v5` - HTTP router (serverkit)
++- `github.com/go-chi/httplog/v3` - Request logging (serverkit)
++- `github.com/redis/go-redis/v9` - Redis client (cachekit)
++- `github.com/jackc/pgx/v5` - PostgreSQL driver (databasekit)
++- `golang.org/x/sync/errgroup` - Concurrent error handling (core)
++
++## Go Version
++
++Requires Go 1.24.6+
++
++## Everyday development tools
++
++The following tools are always-on for every session in this repo.
++
++### Context7 MCP — library documentation
++
++Use the Context7 MCP server to fetch current documentation whenever the task involves a library, framework, SDK, API, CLI tool, or cloud service — even well-known ones (chi, pgx, go-redis, etc.). Your training data may not reflect recent changes.
++
++Steps:
++1. Call `resolve-library-id` with the library name and the question.
++2. Pick the best match by exact name, description relevance, snippet count, source reputation, and benchmark score.
++3. Call `query-docs` with the selected library ID and the full question. If the question spans multiple distinct concepts, make a separate `query-docs` call per concept.
++4. Answer using the fetched docs.
++
++Do not use for: refactoring, writing scripts from scratch, debugging business logic, code review, or general programming concepts.
++
++### Caveman — terse output (always-on, full mode)
++
++Respond terse like smart caveman — drop articles, filler, pleasantries. Fragments OK. Technical terms exact. Code unchanged. Pattern: `[thing] [action] [reason]. [next step].`
++
++Auto-clarity exception: drop to normal prose for security warnings, irreversible action confirmations, multi-step sequences where ambiguity risks misread, or when the user is confused. Resume caveman after.
++
++Available commands: `/caveman lite`, `/caveman full`, `/caveman ultra`, `/caveman-commit`, `/caveman-review`, `/caveman-compress`.
++
++### Ponytail — lazy senior dev (always-on, full mode)
++
++Before writing any code, stop at the first rung that holds:
++
++1. Does this need to be built at all? (YAGNI)
++2. Does it already exist in this codebase? Reuse it.
++3. Does the standard library already do this? Use it.
++4. Does a native platform feature cover it? Use it.
++5. Does an already-installed dependency solve it? Use it.
++6. Can this be one line? Make it one line.
++7. Only then: write the minimum code that works.
++
++Rules: no unrequested abstractions, no avoidable dependencies, no boilerplate. Deletion over addition. Boring over clever. Fewest files possible. Shortest working diff wins. Mark deliberate simplifications with a `ponytail:` comment naming the ceiling and upgrade path.
++
++Not lazy about: understanding the problem, input validation at trust boundaries, error handling, security, anything explicitly requested.
++
++Available commands: `/ponytail lite`, `/ponytail full`, `/ponytail ultra`, `/ponytail off`.
++
 diff --git a/workerkit/CONTEXT.md b/workerkit/CONTEXT.md
 new file mode 100644
 index 0000000..52f9dee
