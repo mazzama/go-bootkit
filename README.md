@@ -6,7 +6,7 @@ A production-ready Go application framework that integrates multiple components 
 
 ## Features
 
-- **Modular Architecture**: Independent modules (`core`, `cachekit`, `databasekit`, `serverkit`) that can be used together or independently.
+- **Modular Architecture**: Independent modules (`core`, `cachekit`, `databasekit`, `serverkit`, `workerkit`) that can be used together or independently.
 - **Unified Lifecycle**: `core.AppRunner` orchestrates startups, graceful shutdowns, and coordinates health checks automatically.
 - **Functional Options**: Configure components easily and safely with idiomatic functional options.
 - **Trace-Correlated Logging**: Built-in `TraceHandler` automatically injects `trace_id` and `span_id` from OpenTelemetry into JSON logs.
@@ -19,6 +19,7 @@ A production-ready Go application framework that integrates multiple components 
 - **CacheKit**: Redis cache integration using `redis/go-redis/v9`.
 - **DatabaseKit**: PostgreSQL integration using `jackc/pgx/v5` and `TxManager` for context-propagated transactions.
 - **ServerKit**: HTTP server wrapped around `go-chi/chi/v5` with panic recovery, CORS, and graceful shutdown.
+- **WorkerKit**: Redis-backed background job processor wrapping `hibiken/asynq` with Client and Server components.
 
 ## Quick Start Example
 
@@ -111,6 +112,7 @@ See individual module `CONTEXT.md` files for deeper domain architecture decision
 - [CacheKit](./cachekit/CONTEXT.md)
 - [DatabaseKit](./databasekit/CONTEXT.md)
 - [ServerKit](./serverkit/CONTEXT.md)
+- [WorkerKit](./workerkit/CONTEXT.md)
 
 ### Running tests
 
