@@ -66,11 +66,11 @@ func TestAsynqClient_Enqueue_NotReady(t *testing.T) {
 	client := workerkit.NewAsynqClient("test-client", redisOpt)
 
 	task := asynq.NewTask("test:task", nil)
-	
+
 	// Create a cancelled context for EnqueueContext
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	
+
 	_, err := client.EnqueueContext(ctx, task)
 	if err == nil {
 		t.Error("expected error for EnqueueContext when not ready")

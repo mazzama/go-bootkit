@@ -2,6 +2,9 @@ package databasekit
 
 import (
 	"context"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,11 +88,94 @@ func TestWithDBName(t *testing.T) {
 	}
 }
 
-func TestWithConnectionString(t *testing.T) {
+func TestWithConnectRetry(t *testing.T) {
 	db := &PostgresDB{}
-	WithConnectionString("postgres://user:pass@host:5432/mydb")(db)
-	if db.connStr != "postgres://user:pass@host:5432/mydb" {
-		t.Errorf("unexpected connStr: %q", db.connStr)
+	WithConnectRetry(5, 2*time.Second)(db)
+	if db.retryAttempts != 5 {
+		t.Errorf("expected 5 retry attempts, got %d", db.retryAttempts)
+	}
+	if db.retryBackoff != 2*time.Second {
+		t.Errorf("expected 2s backoff, got %v", db.retryBackoff)
+	}
+}
+func TestWithLogger(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	db := &PostgresDB{}
+	WithLogger(logger)(db)
+	if db.logger != logger {
+		t.Error("expected logger to be set")
+	}
+}
+
+func TestPostgresDBMethodsWhenPoolNil(t *testing.T) {
+	db := &PostgresDB{}
+	ctx := t.Context()
+
+	_, err := db.Exec(ctx, "SELECT 1")
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("Exec unexpected error: %v", err)
+	}
+
+	_, err = db.Query(ctx, "SELECT 1")
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("Query unexpected error: %v", err)
+	}
+
+	var dummy int
+	err = db.QueryRow(ctx, "SELECT 1").Scan(&dummy)
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("QueryRow unexpected error: %v", err)
+	}
+
+	_, err = db.Begin(ctx)
+	if err == nil || err.Error() != "database pool is not initialized" {
+		t.Errorf("Begin unexpected error: %v", err)
+	}
+
+	if db.TxProvider() != db {
+		t.Error("TxProvider should return db")
+	}
+}
+
+func TestPostgresDBConnectRetryFailure(t *testing.T) {
+	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(2, 1*time.Millisecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = db.Start(ctx)
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to database") && !strings.Contains(err.Error(), "failed to create connection pool") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+func TestPostgresDBConnectRetrySmallBackoff(t *testing.T) {
+	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(2, 1*time.Nanosecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = db.Start(ctx)
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+}
+
+func TestPostgresDBConnectRetryContextCanceled(t *testing.T) {
+	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(5, 50*time.Millisecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = db.Start(ctx)
+	if err == nil {
+		t.Fatal("expected context error")
+	}
+	if !strings.Contains(err.Error(), "context canceled during retry backoff") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -168,11 +254,16 @@ func TestNewPostgresDBValidation(t *testing.T) {
 			connStr: "://not-a-valid-dsn",
 			wantErr: true,
 		},
+		{
+			name:    "empty connection string",
+			connStr: "",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewPostgresDB(WithConnectionString(tt.connStr))
+			_, err := NewPostgresDB(tt.connStr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewPostgresDB() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -180,14 +271,15 @@ func TestNewPostgresDBValidation(t *testing.T) {
 	}
 }
 
-func TestLazyProviderBlocksUntilContextDeadline(t *testing.T) {
+func TestTxManagerBlocksUntilContextDeadline(t *testing.T) {
 	db := &PostgresDB{}
-	provider := db.TxProvider()
+	tm := NewTxManager(db.TxProvider())
+	querier := tm.QuerierFromContext(context.Background())
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := provider.Exec(ctx, "SELECT 1")
+	_, err := querier.Exec(ctx, "SELECT 1")
 	if err == nil {
 		t.Fatal("expected error due to deadline, got nil")
 	}
@@ -196,14 +288,15 @@ func TestLazyProviderBlocksUntilContextDeadline(t *testing.T) {
 	}
 }
 
-func TestLazyProviderQueryRowReturnsError(t *testing.T) {
+func TestTxManagerQueryRowReturnsError(t *testing.T) {
 	db := &PostgresDB{}
-	provider := db.TxProvider()
+	tm := NewTxManager(db.TxProvider())
+	querier := tm.QuerierFromContext(context.Background())
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	row := provider.QueryRow(ctx, "SELECT 1")
+	row := querier.QueryRow(ctx, "SELECT 1")
 	var val int
 	err := row.Scan(&val)
 	if err == nil {

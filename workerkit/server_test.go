@@ -30,7 +30,7 @@ func TestAsynqServer_Lifecycle(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- server.Start(ctx)

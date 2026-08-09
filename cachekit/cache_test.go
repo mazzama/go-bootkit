@@ -1,7 +1,12 @@
 package cachekit
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/redis/go-redis/v9"
@@ -15,11 +20,24 @@ func TestWithName(t *testing.T) {
 	}
 }
 
-func TestWithAddress(t *testing.T) {
+func TestWithConnectRetry(t *testing.T) {
 	cache := &RedisCache{options: defaultOptions()}
-	WithAddress("redis:6380")(cache)
-	if cache.options.Addr != "redis:6380" {
-		t.Errorf("expected 'redis:6380', got %q", cache.options.Addr)
+	WithConnectRetry(3, 100)(cache)
+	if cache.retryAttempts != 3 {
+		t.Errorf("expected 3, got %d", cache.retryAttempts)
+	}
+	if cache.retryBackoff != 100 {
+		t.Errorf("expected 100, got %d", cache.retryBackoff)
+	}
+
+	// Should not set if maxAttempts or backoff <= 0
+	WithConnectRetry(0, 100)(cache)
+	if cache.retryAttempts != 3 {
+		t.Errorf("expected 3, got %d", cache.retryAttempts)
+	}
+	WithConnectRetry(5, 0)(cache)
+	if cache.retryAttempts != 3 {
+		t.Errorf("expected 3, got %d", cache.retryAttempts)
 	}
 }
 
@@ -44,6 +62,116 @@ func TestWithUsername(t *testing.T) {
 	WithUsername("admin")(cache)
 	if cache.options.Username != "admin" {
 		t.Errorf("expected 'admin', got %q", cache.options.Username)
+	}
+}
+func TestWithCodec(t *testing.T) {
+	cache := &RedisCache{}
+	codec := JSONCodec{}
+	WithCodec(codec)(cache)
+	if cache.codec == nil {
+		t.Error("expected codec to be set")
+	}
+}
+func TestJSONCodec(t *testing.T) {
+	codec := JSONCodec{}
+	type item struct {
+		Name string `json:"name"`
+	}
+	b, err := codec.Marshal(item{Name: "bootkit"})
+	if err != nil {
+		t.Fatalf("unexpected marshal error: %v", err)
+	}
+	var res item
+	if err := codec.Unmarshal(b, &res); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if res.Name != "bootkit" {
+		t.Fatalf("expected bootkit, got %s", res.Name)
+	}
+	if err := codec.Unmarshal([]byte("invalid json"), &res); err == nil {
+		t.Fatal("expected unmarshal error for invalid json")
+	}
+}
+
+func TestCodecOrDefault(t *testing.T) {
+	cache := &RedisCache{}
+	if cache.codecOrDefault() != DefaultCodec {
+		t.Error("expected DefaultCodec when cache.codec is nil")
+	}
+	c := JSONCodec{}
+	cache.codec = c
+	if cache.codecOrDefault() != c {
+		t.Error("expected custom codec when set")
+	}
+}
+
+func TestWithLogger(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := &RedisCache{}
+	WithLogger(logger)(cache)
+	if cache.logger != logger {
+		t.Error("expected logger to be set")
+	}
+}
+
+func TestRedisCacheConnectRetryFailure(t *testing.T) {
+	cache, err := NewRedisCache("127.0.0.1:1", WithConnectRetry(2, 1*time.Millisecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = cache.Start(ctx)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid redis address")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to Redis after retries") {
+		t.Errorf("unexpected error msg: %v", err)
+	}
+}
+func TestRedisCacheConnectRetrySmallBackoff(t *testing.T) {
+	cache, err := NewRedisCache("127.0.0.1:1", WithConnectRetry(2, 1*time.Nanosecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = cache.Start(ctx)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid redis address")
+	}
+}
+
+func TestRedisCacheConnectRetryContextCanceled(t *testing.T) {
+	cache, err := NewRedisCache("127.0.0.1:1", WithConnectRetry(5, 50*time.Millisecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = cache.Start(ctx)
+	if err == nil {
+		t.Fatal("expected context error")
+	}
+}
+
+func TestRedisCacheConnectNoRetryFailure(t *testing.T) {
+	cache, err := NewRedisCache("127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = cache.Start(ctx)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid redis address")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to Redis") {
+		t.Errorf("unexpected error msg: %v", err)
+	}
+}
+func TestRedisCacheSetMarshalError(t *testing.T) {
+	cache := &RedisCache{}
+	err := cache.Set(t.Context(), "key", make(chan int), 0)
+	if err == nil {
+		t.Fatal("expected marshal error")
 	}
 }
 
@@ -134,7 +262,7 @@ func TestNewRedisCacheValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewRedisCache(WithAddress(tt.addr))
+			_, err := NewRedisCache(tt.addr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewRedisCache() error = %v, wantErr %v", err, tt.wantErr)
 			}

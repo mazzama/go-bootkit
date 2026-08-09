@@ -55,16 +55,14 @@ func run() error {
 
 	// 4. Infrastructure components. The runner starts these; their pools/clients
 	//    are nil until then, which is why the TxManager reads the pool lazily.
-	db, err := databasekit.NewPostgresDB(
-		databasekit.WithConnectionString(cfg.DBConnStr),
+	db, err := databasekit.NewPostgresDB(cfg.DBConnStr,
 		databasekit.WithLogger(logger),
 	)
 	if err != nil {
 		return err
 	}
 
-	cache, err := cachekit.NewRedisCache(
-		cachekit.WithAddress(cfg.RedisAddr),
+	cache, err := cachekit.NewRedisCache(cfg.RedisAddr,
 		cachekit.WithPassword(cfg.RedisPassword),
 		cachekit.WithLogger(logger),
 	)

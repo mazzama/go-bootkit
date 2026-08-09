@@ -15,6 +15,14 @@ import (
 type MockProvider struct {
 	mock.Mock
 }
+type MockReadyProvider struct {
+	MockProvider
+	readyChan chan struct{}
+}
+
+func (m *MockReadyProvider) Ready() <-chan struct{} {
+	return m.readyChan
+}
 
 func (m *MockProvider) Begin(ctx context.Context) (pgx.Tx, error) {
 	args := m.Called(ctx)
@@ -256,5 +264,68 @@ func TestTxManager(t *testing.T) {
 		provider.AssertExpectations(t)
 		mockTxOuter.AssertExpectations(t)
 		mockTxInner.AssertExpectations(t)
+	})
+	t.Run("Readyable provider ready operations", func(t *testing.T) {
+		readyChan := make(chan struct{})
+		close(readyChan)
+		provider := &MockReadyProvider{readyChan: readyChan}
+		tm := databasekit.NewTxManager(provider)
+
+		provider.On("Exec", mock.Anything, "SELECT 1").Return(pgconn.CommandTag{}, nil)
+		provider.On("Query", mock.Anything, "SELECT 1").Return(nil, nil)
+		provider.On("QueryRow", mock.Anything, "SELECT 1").Return(nil)
+
+		q := tm.QuerierFromContext(ctx)
+		_, err := q.Exec(ctx, "SELECT 1")
+		assert.NoError(t, err)
+
+		_, err = q.Query(ctx, "SELECT 1")
+		assert.NoError(t, err)
+
+		row := q.QueryRow(ctx, "SELECT 1")
+		assert.Nil(t, row)
+
+		provider.AssertExpectations(t)
+	})
+
+	t.Run("Readyable provider unready context timeout", func(t *testing.T) {
+		readyChan := make(chan struct{}) // never closed
+		provider := &MockReadyProvider{readyChan: readyChan}
+		tm := databasekit.NewTxManager(provider)
+
+		ctxTimeout, cancel := context.WithCancel(ctx)
+		cancel()
+
+		q := tm.QuerierFromContext(ctxTimeout)
+		_, err := q.Exec(ctxTimeout, "SELECT 1")
+		assert.Error(t, err)
+
+		_, err = q.Query(ctxTimeout, "SELECT 1")
+		assert.Error(t, err)
+
+		err = tm.WithTx(ctxTimeout, func(ctx context.Context) error {
+			return nil
+		})
+		assert.ErrorContains(t, err, "pool not ready")
+	})
+	t.Run("Non-readyable provider operations", func(t *testing.T) {
+		provider := new(MockProvider)
+		tm := databasekit.NewTxManager(provider)
+
+		provider.On("Exec", mock.Anything, "SELECT 1").Return(pgconn.CommandTag{}, nil)
+		provider.On("Query", mock.Anything, "SELECT 1").Return(nil, nil)
+		provider.On("QueryRow", mock.Anything, "SELECT 1").Return(nil)
+
+		q := tm.QuerierFromContext(ctx)
+		_, err := q.Exec(ctx, "SELECT 1")
+		assert.NoError(t, err)
+
+		_, err = q.Query(ctx, "SELECT 1")
+		assert.NoError(t, err)
+
+		row := q.QueryRow(ctx, "SELECT 1")
+		assert.Nil(t, row)
+
+		provider.AssertExpectations(t)
 	})
 }
