@@ -1,7 +1,9 @@
 package databasekit
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
@@ -175,5 +177,39 @@ func TestNewPostgresDBValidation(t *testing.T) {
 				t.Errorf("NewPostgresDB() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLazyProviderBlocksUntilContextDeadline(t *testing.T) {
+	db := &PostgresDB{}
+	provider := db.TxProvider()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := provider.Exec(ctx, "SELECT 1")
+	if err == nil {
+		t.Fatal("expected error due to deadline, got nil")
+	}
+	if err.Error() != "pool not ready: context deadline exceeded" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLazyProviderQueryRowReturnsError(t *testing.T) {
+	db := &PostgresDB{}
+	provider := db.TxProvider()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	row := provider.QueryRow(ctx, "SELECT 1")
+	var val int
+	err := row.Scan(&val)
+	if err == nil {
+		t.Fatal("expected error due to deadline, got nil")
+	}
+	if err.Error() != "pool not ready: context deadline exceeded" {
+		t.Errorf("unexpected error from Scan: %v", err)
 	}
 }

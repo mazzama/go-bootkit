@@ -36,6 +36,7 @@ type Aggregator struct {
 	cache    [3]atomic.Value
 	checks   map[Kind][]Check
 	cacheTTL time.Duration
+	hook     func(kind Kind, duration time.Duration, err error)
 	mu       sync.RWMutex
 	flight   singleflight.Group
 }
@@ -99,6 +100,14 @@ func (a *Aggregator) Register(checks ...Check) {
 	}
 }
 
+// SetHook sets a callback to be invoked after each health check evaluation cycle.
+// It is used internally by the framework's observability seam.
+func (a *Aggregator) SetHook(hook func(kind Kind, duration time.Duration, err error)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.hook = hook
+}
+
 func (a *Aggregator) Handler(kind Kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := a.evaluate(r.Context(), kind); err != nil {
@@ -157,6 +166,16 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 
 		return nil, finalErr
 	})
+
+	duration := time.Since(now)
+
+	a.mu.RLock()
+	hook := a.hook
+	a.mu.RUnlock()
+
+	if hook != nil {
+		hook(kind, duration, err)
+	}
 
 	return err
 }

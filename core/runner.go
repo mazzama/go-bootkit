@@ -20,6 +20,7 @@ type ApplicationRunner struct {
 	healthAggregator *healthkit.Aggregator
 	startDeadline    time.Duration
 	shutdownTimeout  time.Duration
+	hooks            Hooks
 	mu               sync.Mutex
 }
 
@@ -29,6 +30,7 @@ func NewApplicationRunner(options ...Option) *ApplicationRunner {
 	runner := &ApplicationRunner{
 		shutdownTimeout:  15 * time.Second,           // Default shutdown timeout
 		healthAggregator: healthkit.NewAggregator(0), // 0 applies 1s floor
+		hooks:            NoOpHooks{},
 	}
 
 	for _, option := range options {
@@ -68,6 +70,14 @@ func WithServices(services ...Component) Option {
 	}
 }
 
+func WithHooks(h Hooks) Option {
+	return func(a *ApplicationRunner) {
+		if h != nil {
+			a.hooks = h
+		}
+	}
+}
+
 // HealthAggregator returns the runner's health check aggregator. Use it to wire
 // health endpoints into your HTTP router before calling Run.
 func (r *ApplicationRunner) HealthAggregator() *healthkit.Aggregator {
@@ -91,6 +101,11 @@ func WithHealthAggregator(agg *healthkit.Aggregator) Option {
 }
 
 func (r *ApplicationRunner) Run(ctx context.Context) error {
+	// Provide a hook callback to healthkit aggregator
+	r.healthAggregator.SetHook(func(kind healthkit.Kind, duration time.Duration, err error) {
+		r.hooks.OnHealthEvaluated(kind, duration, err)
+	})
+
 	r.mu.Lock()
 	for _, s := range r.services {
 		if provider, ok := s.(HealthCheckProvider); ok {
@@ -111,7 +126,12 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 		// Start loop
 		eg.Go(func() error {
 			defer cancelSvc()
-			if err := svc.Start(svcCtx); err != nil && !errors.Is(err, context.Canceled) {
+			start := time.Now()
+			err := svc.Start(svcCtx)
+			duration := time.Since(start)
+			r.hooks.OnComponentStart(svc.Name(), duration, err)
+
+			if err != nil && !errors.Is(err, context.Canceled) {
 				return fmt.Errorf("%s: %w", svc.Name(), err)
 			}
 			return nil
@@ -145,21 +165,25 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 	// Shutdown sequentially in reverse registration order
 	for i := len(r.services) - 1; i >= 0; i-- {
 		svc := r.services[i]
-		
+
 		budget := remainingTimeout / time.Duration(i+1)
 		start := time.Now()
 		shCtx, cancel := context.WithTimeout(context.Background(), budget)
-		
-		if stopErr := svc.Stop(shCtx); stopErr != nil {
+
+		stopErr := svc.Stop(shCtx)
+		stopDuration := time.Since(start)
+		r.hooks.OnComponentStop(svc.Name(), stopDuration, stopErr)
+
+		if stopErr != nil {
 			wrappedErr := fmt.Errorf("%s: shutdown error: %w", svc.Name(), stopErr)
 			if r.logger != nil {
 				r.logger.Error("Service shutdown error", "error", wrappedErr)
 			}
 			shutdownErrs = append(shutdownErrs, wrappedErr)
 		}
-		
+
 		cancel()
-		
+
 		elapsed := time.Since(start)
 		remainingTimeout -= elapsed
 		if remainingTimeout < 0 {

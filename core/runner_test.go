@@ -359,3 +359,73 @@ func TestRunReturnsShutdownErrors(t *testing.T) {
 		t.Errorf("expected error to contain svc2 failure, got: %v", err)
 	}
 }
+
+type recordingHooks struct {
+	mu           sync.Mutex
+	starts       []string
+	stops        []string
+	healthChecks []healthkit.Kind
+}
+
+func (r *recordingHooks) OnComponentStart(name string, duration time.Duration, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.starts = append(r.starts, name)
+}
+func (r *recordingHooks) OnComponentStop(name string, duration time.Duration, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stops = append(r.stops, name)
+}
+func (r *recordingHooks) OnHealthEvaluated(kind healthkit.Kind, duration time.Duration, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.healthChecks = append(r.healthChecks, kind)
+}
+
+func TestRunHooksAreCalled(t *testing.T) {
+	hooks := &recordingHooks{}
+	readyCh := make(chan struct{})
+	svc := &mockHealthComponent{
+		mockComponent: mockComponent{
+			name:    "hooked-svc",
+			readyCh: readyCh,
+			startFn: func(ctx context.Context) error {
+				close(readyCh)
+				<-ctx.Done()
+				return nil
+			},
+		},
+		checks: []healthkit.Check{
+			{Name: "check", Kind: healthkit.Liveness, Fn: func(ctx context.Context) error { return nil }},
+		},
+	}
+
+	r := NewApplicationRunner(
+		WithServices(svc),
+		WithHooks(hooks),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_ = r.Run(ctx)
+
+	// Trigger health check to ensure hook fires
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	r.HealthAggregator().Handler(healthkit.Liveness).ServeHTTP(rec, req)
+
+	hooks.mu.Lock()
+	defer hooks.mu.Unlock()
+
+	if len(hooks.starts) != 1 || hooks.starts[0] != "hooked-svc" {
+		t.Errorf("expected 1 start hook for hooked-svc, got %v", hooks.starts)
+	}
+	if len(hooks.stops) != 1 || hooks.stops[0] != "hooked-svc" {
+		t.Errorf("expected 1 stop hook for hooked-svc, got %v", hooks.stops)
+	}
+	if len(hooks.healthChecks) != 1 || hooks.healthChecks[0] != healthkit.Liveness {
+		t.Errorf("expected 1 health hook for Liveness, got %v", hooks.healthChecks)
+	}
+}
