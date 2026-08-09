@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
 
@@ -35,7 +34,10 @@ func run() error {
 	// 2. Trace-correlated logger. NewLogger wraps a JSON handler with the
 	//    TraceHandler, so any log emitted with a span in its context carries
 	//    trace_id/span_id.
-	logger := core.NewLogger(core.WithLogLevel(slog.LevelInfo))
+	logger := core.NewLogger(
+		core.WithLogLevel(slog.LevelInfo),
+		core.WithServiceName(serviceName),
+	)
 	slog.SetDefault(logger)
 
 	// 3. OpenTelemetry tracing to stdout, so the trace IDs above are real.
@@ -105,7 +107,7 @@ func run() error {
 	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
 	handler.Routes(router)
 
-	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")
+	httpHandler := otelhttp.NewHandler(router, "http.server")
 	server, err := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, httpHandler, serverkit.WithLogger(logger))
 	if err != nil {
 		return err
