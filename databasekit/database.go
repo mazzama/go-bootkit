@@ -77,10 +77,12 @@ func NewPostgresDB(connStr string, options ...PostgresOption) (*PostgresDB, erro
 				}
 				sleepDuration := backoff + jitter
 
+				timer := time.NewTimer(sleepDuration)
 				select {
 				case <-ctx.Done():
+					timer.Stop()
 					return nil, fmt.Errorf("context canceled during retry backoff: %w", ctx.Err())
-				case <-time.After(sleepDuration):
+				case <-timer.C:
 				}
 			}
 		}

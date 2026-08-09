@@ -128,6 +128,18 @@ func TestRedisCacheConnectRetryFailure(t *testing.T) {
 		t.Errorf("unexpected error msg: %v", err)
 	}
 }
+func TestRedisCacheConnectRetrySmallBackoff(t *testing.T) {
+	cache, err := NewRedisCache("127.0.0.1:1", WithConnectRetry(2, 1*time.Nanosecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = cache.Start(ctx)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid redis address")
+	}
+}
+
 
 func TestRedisCacheConnectRetryContextCanceled(t *testing.T) {
 	cache, err := NewRedisCache("127.0.0.1:1", WithConnectRetry(5, 50*time.Millisecond))

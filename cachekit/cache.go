@@ -85,7 +85,10 @@ func NewRedisCache(addr string, options ...RedisOption) (*RedisCache, error) {
 				}
 				_ = client.Close()
 				if attempt < cache.retryAttempts-1 {
-					jitter := time.Duration(rand.Int64N(int64(cache.retryBackoff) / 2))
+					jitter := time.Duration(0)
+					if half := int64(cache.retryBackoff / 2); half > 0 {
+						jitter = time.Duration(rand.Int64N(half))
+					}
 					backoff := cache.retryBackoff*(1<<attempt) + jitter
 
 					timer := time.NewTimer(backoff)

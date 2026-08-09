@@ -151,6 +151,18 @@ func TestPostgresDBConnectRetryFailure(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+func TestPostgresDBConnectRetrySmallBackoff(t *testing.T) {
+	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(2, 1*time.Nanosecond))
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := t.Context()
+	err = db.Start(ctx)
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+}
+
 
 func TestPostgresDBConnectRetryContextCanceled(t *testing.T) {
 	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(5, 50*time.Millisecond))

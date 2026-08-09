@@ -308,4 +308,24 @@ func TestTxManager(t *testing.T) {
 		})
 		assert.ErrorContains(t, err, "pool not ready")
 	})
+	t.Run("Non-readyable provider operations", func(t *testing.T) {
+		provider := new(MockProvider)
+		tm := databasekit.NewTxManager(provider)
+
+		provider.On("Exec", mock.Anything, "SELECT 1").Return(pgconn.CommandTag{}, nil)
+		provider.On("Query", mock.Anything, "SELECT 1").Return(nil, nil)
+		provider.On("QueryRow", mock.Anything, "SELECT 1").Return(nil)
+
+		q := tm.QuerierFromContext(ctx)
+		_, err := q.Exec(ctx, "SELECT 1")
+		assert.NoError(t, err)
+
+		_, err = q.Query(ctx, "SELECT 1")
+		assert.NoError(t, err)
+
+		row := q.QueryRow(ctx, "SELECT 1")
+		assert.Nil(t, row)
+
+		provider.AssertExpectations(t)
+	})
 }
