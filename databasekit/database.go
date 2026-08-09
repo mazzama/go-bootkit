@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
@@ -143,3 +145,60 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 
 var _ core.Component = (*PostgresDB)(nil)
 var _ core.Readyable = (*PostgresDB)(nil)
+
+type errRow struct{ err error }
+
+func (e errRow) Scan(dest ...any) error {
+	return e.err
+}
+
+type lazyProvider struct {
+	db *PostgresDB
+}
+
+func (p lazyProvider) wait(ctx context.Context) error {
+	select {
+	case <-p.db.Ready():
+		if p.db.Pool() == nil {
+			return fmt.Errorf("database pool is not initialized")
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("pool not ready: %w", ctx.Err())
+	}
+}
+
+func (p lazyProvider) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+	if err := p.wait(ctx); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	return p.db.Pool().Exec(ctx, sql, arguments...)
+}
+
+func (p lazyProvider) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	if err := p.wait(ctx); err != nil {
+		return nil, err
+	}
+	return p.db.Pool().Query(ctx, sql, args...)
+}
+
+func (p lazyProvider) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	if err := p.wait(ctx); err != nil {
+		return errRow{err: err}
+	}
+	return p.db.Pool().QueryRow(ctx, sql, args...)
+}
+
+func (p lazyProvider) Begin(ctx context.Context) (pgx.Tx, error) {
+	if err := p.wait(ctx); err != nil {
+		return nil, err
+	}
+	return p.db.Pool().Begin(ctx)
+}
+
+// TxProvider returns a databasekit.TxProvider that waits for the database pool
+// to become ready before executing queries. This allows consumers to wire their
+// transaction managers and repositories before calling runner.Run().
+func (db *PostgresDB) TxProvider() TxProvider {
+	return lazyProvider{db: db}
+}

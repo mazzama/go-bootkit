@@ -69,9 +69,9 @@ func run() error {
 		return err
 	}
 
-	// 5. Domain wiring. The TxManager is built over a lazy provider so it can be
-	//    constructed before the runner has opened the pool.
-	txManager := databasekit.NewTxManager(lazyPoolProvider{pool: db.Pool})
+	// 5. Domain wiring. The TxManager uses the database's TxProvider, which
+	//    lazily waits for the connection pool to become ready when called.
+	txManager := databasekit.NewTxManager(db.TxProvider())
 	productRepo := NewProductRepository(txManager)
 	orderRepo := NewOrderRepository(txManager)
 	service := NewOrderService(txManager, productRepo, orderRepo, cache, logger)
