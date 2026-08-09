@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/mazzama/go-bootkit/serverkit"
-	"github.com/mazzama/go-bootkit/workerpool"
-	"github.com/mazzama/go-bootkit/workerpool/memory"
+	"github.com/mazzama/go-bootkit/workerkit"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -79,20 +79,22 @@ func run() error {
 	service := NewOrderService(txManager, productRepo, orderRepo, cache, logger)
 	handler := NewHandler(service, logger)
 
-	// Set up background worker pool
-	queue := memory.NewQueue(1000)
-	processor := NewNotificationProcessor(logger)
-	pool := workerpool.NewWorkerPool(
+	// Set up background worker (client + server)
+	redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr, Password: cfg.RedisPassword}
+	asyncClient := workerkit.NewAsynqClient("notification-client", redisOpt)
+	asyncServer := workerkit.NewAsynqServer(
 		"notification-worker",
-		queue,
-		processor,
-		workerpool.WithWorkers(5),
-		workerpool.WithLogger(logger),
+		redisOpt,
+		workerkit.WithConcurrency(5),
 	)
+
+	// Register handlers
+	processor := NewNotificationProcessor(logger)
+	asyncServer.HandleFunc("notification:send", processor.Process)
 
 	runner := core.NewApplicationRunner(
 		core.WithLogger(logger),
-		core.WithServices(db, cache, pool),
+		core.WithServices(db, cache, asyncClient, asyncServer),
 	)
 
 	// 6. HTTP server. NewDefaultHandler gives a chi router with health probes,
