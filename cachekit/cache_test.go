@@ -124,7 +124,7 @@ func TestRedisCacheConnectRetryFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error connecting to invalid redis address")
 	}
-	if !strings.Contains(err.Error(), "failed to connect to Redis after retries") {
+	if !strings.Contains(err.Error(), "failed to connect to Redis") {
 		t.Errorf("unexpected error msg: %v", err)
 	}
 }

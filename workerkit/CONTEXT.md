@@ -1,15 +1,29 @@
 # workerkit
 
-The `workerkit` module integrates `hibiken/asynq` (a Redis-backed background job processor) with the Bootkit framework. It splits Asynq into two `core.Component` implementations: `AsynqClient` for enqueueing jobs, and `AsynqServer` for processing jobs.
+The `workerkit` module integrates `hibiken/asynq` (a Redis-backed background job processor) with the Bootkit framework.
+
+## Glossary
+
+- **Enqueuer**: Interface for enqueueing background tasks (`Enqueue`, `EnqueueContext`). Accepts framework `Task` values — callers never import `asynq`. `AsynqClient` implements it for production; `InMemoryClient` in `workerkit/memqueue` implements it for tests.
+- **Task**: Framework-native unit of work (`Type string`, `Payload []byte`). Decoupled from `asynq.Task`. Adapters map to backend-specific types internally.
+- **TaskInfo**: Metadata about an enqueued task (`ID`, `Type`, `Queue`, `State`).
+- **EnqueueOption**: Functional options for task enqueueing (`WithQueue`, `WithMaxRetry`, `WithDeadline`). Mapped to asynq options inside `AsynqClient`.
+- **AsynqClient**: Production adapter. Implements `Enqueuer` and `core.Component`. Readiness-gates task enqueueing so callers don't enqueue before the Redis connection is live. Exposes `EnqueueWithAsynq`/`EnqueueContextWithAsynq` as escape hatches for callers with advanced asynq needs.
+- **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Exposes `Mux()` for task handler registration.
+- **InMemoryClient**: Test adapter in `workerkit/memqueue`. Stores enqueued tasks in a slice. Never returns errors (unless context is cancelled). Use `Tasks()` to inspect and `Reset()` between tests.
 
 ## Architecture
 
 By separating Client and Server into two components:
-1. **HTTP Nodes** can embed just the `AsynqClient` component. This saves resources as they don't spin up worker goroutines.
+1. **HTTP Nodes** can embed just the `AsynqClient` component. Saves resources — no worker goroutines.
 2. **Worker Nodes** can embed just the `AsynqServer` component.
 3. **Monoliths** can embed both.
 
-Both components integrate with `core.Lifecycle` to honor graceful shutdown and context timeouts, and with `healthkit` to report liveness/readiness.
+### Enqueuer seam
+
+The `Enqueuer` interface decouples callers from `asynq`. Services accept `Enqueuer` in their constructors and use `Task` values. In production, pass `AsynqClient`. In tests, pass `memqueue.New()`.
+
+This mirrors the `cachekit.Cache` / `memcache.MemoryCache` pattern — same seam shape, same test ergonomics.
 
 ## Usage
 
@@ -21,50 +35,82 @@ import (
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 
-// Configure Redis connection
 redisOpt := asynq.RedisClientOpt{Addr: "localhost:6379"}
 
-// Create Client for enqueueing tasks
+// Client for enqueueing tasks — implements Enqueuer.
 client := workerkit.NewAsynqClient("asynq-client", redisOpt)
 
-// Create Server for processing tasks
+// Server for processing tasks.
 server := workerkit.NewAsynqServer(
 	"asynq-server",
 	redisOpt,
 	asynq.Config{Concurrency: 20},
 )
 
-// Define your task handlers
+// Register task handlers.
 server.Mux().HandleFunc("email:deliver", HandleEmailDelivery)
 
-// Pass to the application runner
 runner := core.NewApplicationRunner(
 	core.WithServices(client, server),
 )
 ```
 
-### 2. Enqueue Tasks
+### 2. Enqueue Tasks (framework-native)
 
-Use the client component (which behaves like `asynq.Client`) to enqueue tasks asynchronously:
+Use `Enqueuer` and `Task` — no asynq import needed:
 
 ```go
-task := asynq.NewTask("email:deliver", []byte(`{"to": "user@example.com"}`))
+type MyService struct {
+	enqueuer workerkit.Enqueuer
+}
 
-// EnqueueContext respects the client's Lifecycle Readiness state
-info, err := client.EnqueueContext(ctx, task)
+func (s *MyService) Send(ctx context.Context) error {
+	task := workerkit.Task{
+		Type:    "email:deliver",
+		Payload: []byte(`{"to":"user@example.com"}`),
+	}
+	info, err := s.enqueuer.EnqueueContext(ctx, task, workerkit.WithQueue("critical"))
+	// ...
+}
 ```
 
-### 3. Process Tasks
+### 3. Test Services with InMemoryClient
 
-The handler function simply needs to match `asynq`'s signature:
+```go
+import "github.com/mazzama/go-bootkit/workerkit/memqueue"
+
+func TestSend(t *testing.T) {
+	client := memqueue.New()
+	svc := &MyService{enqueuer: client}
+
+	err := svc.Send(context.Background())
+	// No error expected.
+
+	tasks := client.Tasks()
+	// Assert task type, payload, etc.
+}
+```
+
+### 4. Advanced: Enqueue Raw asynq Tasks
+
+When you need asynq-specific features not covered by `EnqueueOption`:
+
+```go
+aTask := asynq.NewTask("complex:job", payload)
+info, err := client.EnqueueWithAsynq(aTask, asynq.Queue("heavy"), asynq.MaxRetry(10))
+```
+
+### 5. Process Tasks
+
+Handler functions match asynq's signature:
 
 ```go
 func HandleEmailDelivery(ctx context.Context, t *asynq.Task) error {
-    // Deserialize payload and do work
-    return nil // returning an error automatically triggers retries
+	// Deserialize payload and do work.
+	return nil // returning an error triggers retries.
 }
 ```
 
 ## Configuration
 
-`NewAsynqServer` accepts `asynq.Config` directly, which allows you to configure dead-letter queues, strict priority queues, and custom retry delays natively without wrapping abstractions.
+`NewAsynqServer` accepts `asynq.Config` directly for dead-letter queues, strict priority queues, and custom retry delays.

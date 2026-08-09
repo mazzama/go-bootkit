@@ -24,7 +24,6 @@ func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
 	}
 
 	c.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
-		// Nothing to start for the client, just return a closure to close it
 		return func(shutdownCtx context.Context) error {
 			return c.client.Close()
 		}, nil
@@ -33,7 +32,39 @@ func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
 	return c
 }
 
-func (c *AsynqClient) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+// Enqueue schedules a framework Task for asynchronous execution.
+func (c *AsynqClient) Enqueue(task Task, opts ...EnqueueOption) (*TaskInfo, error) {
+	select {
+	case <-c.Ready():
+	case <-context.Background().Done():
+		return nil, fmt.Errorf("client not ready")
+	}
+	aTask := asynq.NewTask(task.Type, task.Payload)
+	info, err := c.client.Enqueue(aTask, toAsynqOpts(opts)...)
+	if err != nil {
+		return nil, err
+	}
+	return fromAsynqInfo(info), nil
+}
+
+// EnqueueContext schedules a framework Task with context propagation.
+func (c *AsynqClient) EnqueueContext(ctx context.Context, task Task, opts ...EnqueueOption) (*TaskInfo, error) {
+	select {
+	case <-c.Ready():
+	case <-ctx.Done():
+		return nil, fmt.Errorf("client not ready: %w", ctx.Err())
+	}
+	aTask := asynq.NewTask(task.Type, task.Payload)
+	info, err := c.client.EnqueueContext(ctx, aTask, toAsynqOpts(opts)...)
+	if err != nil {
+		return nil, err
+	}
+	return fromAsynqInfo(info), nil
+}
+
+// EnqueueWithAsynq enqueues a raw *asynq.Task with asynq.Option values.
+// This is the low-level escape hatch; prefer Enqueue through the Enqueuer interface.
+func (c *AsynqClient) EnqueueWithAsynq(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	select {
 	case <-c.Ready():
 	case <-context.Background().Done():
@@ -42,7 +73,9 @@ func (c *AsynqClient) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.Ta
 	return c.client.Enqueue(task, opts...)
 }
 
-func (c *AsynqClient) EnqueueContext(ctx context.Context, task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+// EnqueueContextWithAsynq enqueues a raw *asynq.Task with context propagation.
+// This is the low-level escape hatch; prefer EnqueueContext through the Enqueuer interface.
+func (c *AsynqClient) EnqueueContextWithAsynq(ctx context.Context, task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	select {
 	case <-c.Ready():
 	case <-ctx.Done():
@@ -59,4 +92,32 @@ func (c *AsynqClient) HealthChecks() []healthkit.Check {
 	return asynqHealthChecks(c.name, c.Ready())
 }
 
+func toAsynqOpts(opts []EnqueueOption) []asynq.Option {
+	o := &enqueueOptions{}
+	for _, fn := range opts {
+		fn(o)
+	}
+	var aOpts []asynq.Option
+	if o.queue != "" {
+		aOpts = append(aOpts, asynq.Queue(o.queue))
+	}
+	if o.maxRetry > 0 {
+		aOpts = append(aOpts, asynq.MaxRetry(o.maxRetry))
+	}
+	if !o.deadline.IsZero() {
+		aOpts = append(aOpts, asynq.Deadline(o.deadline))
+	}
+	return aOpts
+}
+
+func fromAsynqInfo(info *asynq.TaskInfo) *TaskInfo {
+	return &TaskInfo{
+		ID:    info.ID,
+		Type:  info.Type,
+		Queue: info.Queue,
+		State: fmt.Sprintf("%d", info.State),
+	}
+}
+
 var _ core.Component = (*AsynqClient)(nil)
+var _ Enqueuer = (*AsynqClient)(nil)

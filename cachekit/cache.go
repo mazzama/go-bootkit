@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"time"
 
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
+	"github.com/mazzama/go-bootkit/core/retry"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -75,40 +75,23 @@ func NewRedisCache(addr string, options ...RedisOption) (*RedisCache, error) {
 
 	cache.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
 		var client *redis.Client
-		var err error
 
-		if cache.retryAttempts > 0 {
-			for attempt := 0; attempt < cache.retryAttempts; attempt++ {
-				client = redis.NewClient(cache.options)
-				if err = client.Ping(ctx).Err(); err == nil {
-					break
-				}
-				_ = client.Close()
-				if attempt < cache.retryAttempts-1 {
-					jitter := time.Duration(0)
-					if half := int64(cache.retryBackoff / 2); half > 0 {
-						jitter = time.Duration(rand.Int64N(half))
-					}
-					backoff := cache.retryBackoff*(1<<attempt) + jitter
+		attempts := cache.retryAttempts
+		if attempts <= 0 {
+			attempts = 1
+		}
 
-					timer := time.NewTimer(backoff)
-					select {
-					case <-ctx.Done():
-						timer.Stop()
-						return nil, ctx.Err()
-					case <-timer.C:
-					}
-				}
+		err := retry.Do(ctx, attempts, cache.retryBackoff, func(ctx context.Context) error {
+			c := redis.NewClient(cache.options)
+			if pingErr := c.Ping(ctx).Err(); pingErr != nil {
+				_ = c.Close()
+				return pingErr
 			}
-			if err != nil {
-				return nil, fmt.Errorf("failed to connect to Redis after retries: %w", err)
-			}
-		} else {
-			client = redis.NewClient(cache.options)
-			if err = client.Ping(ctx).Err(); err != nil {
-				_ = client.Close()
-				return nil, fmt.Errorf("failed to connect to Redis: %w", err)
-			}
+			client = c
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 		}
 
 		cache.client = client
@@ -219,5 +202,4 @@ func (r *RedisCache) HealthChecks() []healthkit.Check {
 }
 
 var _ core.Component = (*RedisCache)(nil)
-var _ core.Readyable = (*RedisCache)(nil)
 var _ Cache = (*RedisCache)(nil)

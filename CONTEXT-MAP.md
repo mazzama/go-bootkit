@@ -8,5 +8,6 @@ This file maps the different module contexts in the `go-bootkit` repository.
 | `core` | [core/CONTEXT.md](core/CONTEXT.md) | Core application lifecycle and framework primitives |
 | `databasekit` | [databasekit/CONTEXT.md](databasekit/CONTEXT.md) | Database connection pools, querying, and transactions |
 | `serverkit` | [serverkit/CONTEXT.md](serverkit/CONTEXT.md) | HTTP and gRPC server setups |
+| `workerkit` | [workerkit/CONTEXT.md](workerkit/CONTEXT.md) | Redis-backed background job processing (asynq) |
 
 For guidelines on reading and writing domain documentation, see [domain.md](docs/agents/domain.md).
