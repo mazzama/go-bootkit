@@ -13,16 +13,16 @@ import (
 // Querier from the context on every call, so the same methods work both inside
 // and outside a TxManager transaction.
 type pgProductRepository struct {
-	tx *databasekit.TxManager
+	resolver databasekit.QuerierResolver
 }
 
-// NewProductRepository builds a ProductRepository over the given TxManager.
-func NewProductRepository(tx *databasekit.TxManager) ProductRepository {
-	return &pgProductRepository{tx: tx}
+// NewProductRepository builds a ProductRepository over the given QuerierResolver.
+func NewProductRepository(resolver databasekit.QuerierResolver) ProductRepository {
+	return &pgProductRepository{resolver: resolver}
 }
 
 func (r *pgProductRepository) Create(ctx context.Context, name string, price, stock int64) (Product, error) {
-	q := r.tx.QuerierFromContext(ctx)
+	q := r.resolver.QuerierFromContext(ctx)
 
 	var p Product
 	err := q.QueryRow(ctx,
@@ -38,12 +38,12 @@ func (r *pgProductRepository) Create(ctx context.Context, name string, price, st
 }
 
 func (r *pgProductRepository) GetByID(ctx context.Context, id int64) (Product, error) {
-	q := r.tx.QuerierFromContext(ctx)
+	q := r.resolver.QuerierFromContext(ctx)
 	return scanProduct(ctx, q, id, false)
 }
 
 func (r *pgProductRepository) GetForUpdate(ctx context.Context, id int64) (Product, error) {
-	q := r.tx.QuerierFromContext(ctx)
+	q := r.resolver.QuerierFromContext(ctx)
 	return scanProduct(ctx, q, id, true)
 }
 
@@ -65,7 +65,7 @@ func scanProduct(ctx context.Context, q databasekit.Querier, id int64, forUpdate
 }
 
 func (r *pgProductRepository) DecrementStock(ctx context.Context, id, quantity int64) error {
-	q := r.tx.QuerierFromContext(ctx)
+	q := r.resolver.QuerierFromContext(ctx)
 	_, err := q.Exec(ctx,
 		`UPDATE products SET stock = stock - $1 WHERE id = $2`,
 		quantity, id,
@@ -78,16 +78,16 @@ func (r *pgProductRepository) DecrementStock(ctx context.Context, id, quantity i
 
 // pgOrderRepository is a Postgres-backed OrderRepository.
 type pgOrderRepository struct {
-	tx *databasekit.TxManager
+	resolver databasekit.QuerierResolver
 }
 
-// NewOrderRepository builds an OrderRepository over the given TxManager.
-func NewOrderRepository(tx *databasekit.TxManager) OrderRepository {
-	return &pgOrderRepository{tx: tx}
+// NewOrderRepository builds an OrderRepository over the given QuerierResolver.
+func NewOrderRepository(resolver databasekit.QuerierResolver) OrderRepository {
+	return &pgOrderRepository{resolver: resolver}
 }
 
 func (r *pgOrderRepository) Create(ctx context.Context, productID, quantity, total int64) (Order, error) {
-	q := r.tx.QuerierFromContext(ctx)
+	q := r.resolver.QuerierFromContext(ctx)
 
 	var o Order
 	err := q.QueryRow(ctx,
@@ -103,7 +103,7 @@ func (r *pgOrderRepository) Create(ctx context.Context, productID, quantity, tot
 }
 
 func (r *pgOrderRepository) GetByID(ctx context.Context, id int64) (Order, error) {
-	q := r.tx.QuerierFromContext(ctx)
+	q := r.resolver.QuerierFromContext(ctx)
 
 	var o Order
 	err := q.QueryRow(ctx,

@@ -2,6 +2,7 @@ package cachekit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -14,7 +15,7 @@ import (
 // Cache is the interface for generic cache operations. RedisCache satisfies it;
 // for tests, use memcache.New() from the cachekit/memcache sub-package.
 type Cache interface {
-	Get(ctx context.Context, key string) (string, error)
+	Get(ctx context.Context, key string, dest any) error
 	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
 	Delete(ctx context.Context, key string) error
 	Exists(ctx context.Context, key string) (bool, error)
@@ -111,11 +112,19 @@ func (r *RedisCache) Client() *redis.Client {
 }
 
 func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
-	return r.Client().Set(ctx, key, value, expiration).Err()
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return r.Client().Set(ctx, key, b, expiration).Err()
 }
 
-func (r *RedisCache) Get(ctx context.Context, key string) (string, error) {
-	return r.Client().Get(ctx, key).Result()
+func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
+	str, err := r.Client().Get(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(str), dest)
 }
 
 func (r *RedisCache) Delete(ctx context.Context, key string) error {

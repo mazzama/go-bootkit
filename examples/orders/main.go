@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/core"
@@ -85,7 +84,7 @@ func run() error {
 	asyncServer := workerkit.NewAsynqServer(
 		"notification-worker",
 		redisOpt,
-		workerkit.WithConcurrency(5),
+		asynq.Config{Concurrency: 5},
 	)
 
 	// Register handlers
@@ -103,7 +102,7 @@ func run() error {
 	//    middleware. Wrapping at the server level (rather than router.Use) avoids
 	//    chi's "middleware after routes" panic, since the default handler has
 	//    already registered its health routes.
-	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger).(*chi.Mux)
+	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
 	handler.Routes(router)
 
 	var httpHandler http.Handler = otelhttp.NewHandler(router, "http.server")

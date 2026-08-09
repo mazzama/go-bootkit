@@ -114,7 +114,27 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 	return srv, nil
 }
 
-func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger) http.Handler {
+type RouterOptions struct {
+	Timeout time.Duration
+}
+
+type RouterOption func(*RouterOptions)
+
+// WithRouterTimeout sets the request timeout middleware duration.
+func WithRouterTimeout(d time.Duration) RouterOption {
+	return func(o *RouterOptions) {
+		if d > 0 {
+			o.Timeout = d
+		}
+	}
+}
+
+func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger, opts ...RouterOption) chi.Router {
+	options := RouterOptions{Timeout: 60 * time.Second}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	router := chi.NewRouter()
 
 	if logger == nil {
@@ -131,7 +151,7 @@ func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger) http.H
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Recoverer)
-	router.Use(middleware.Timeout(60 * time.Second))
+	router.Use(middleware.Timeout(options.Timeout))
 
 	// Setup health routes if aggregator is provided
 	if health != nil {

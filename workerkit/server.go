@@ -10,24 +10,6 @@ import (
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
-type ServerConfig struct {
-	asynq.Config
-}
-
-type ServerOption func(*ServerConfig)
-
-func WithConcurrency(n int) ServerOption {
-	return func(c *ServerConfig) {
-		c.Concurrency = n
-	}
-}
-
-func WithAsynqConfig(cfg asynq.Config) ServerOption {
-	return func(c *ServerConfig) {
-		c.Config = cfg
-	}
-}
-
 type AsynqServer struct {
 	core.Lifecycle
 	name   string
@@ -36,14 +18,8 @@ type AsynqServer struct {
 	logger *slog.Logger
 }
 
-func NewAsynqServer(name string, redisOpt asynq.RedisConnOpt, opts ...ServerOption) *AsynqServer {
-	cfg := &ServerConfig{}
-	cfg.Concurrency = 10 // default
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	server := asynq.NewServer(redisOpt, cfg.Config)
+func NewAsynqServer(name string, redisOpt asynq.RedisConnOpt, cfg asynq.Config) *AsynqServer {
+	server := asynq.NewServer(redisOpt, cfg)
 	mux := asynq.NewServeMux()
 
 	s := &AsynqServer{

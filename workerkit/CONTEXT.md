@@ -31,7 +31,7 @@ client := workerkit.NewAsynqClient("asynq-client", redisOpt)
 server := workerkit.NewAsynqServer(
 	"asynq-server",
 	redisOpt,
-	workerkit.WithConcurrency(20),
+	asynq.Config{Concurrency: 20},
 )
 
 // Define your task handlers
@@ -65,6 +65,6 @@ func HandleEmailDelivery(ctx context.Context, t *asynq.Task) error {
 }
 ```
 
-## Options
+## Configuration
 
-`NewAsynqServer` accepts `WithConcurrency(n)` for simple tuning, but also `WithAsynqConfig(cfg)` which allows you to pass a completely custom `asynq.Config` to configure dead-letter queues, strict priority queues, and custom retry delays.
+`NewAsynqServer` accepts `asynq.Config` directly, which allows you to configure dead-letter queues, strict priority queues, and custom retry delays natively without wrapping abstractions.

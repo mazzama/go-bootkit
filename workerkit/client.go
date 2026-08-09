@@ -15,18 +15,12 @@ type AsynqClient struct {
 	client *asynq.Client
 }
 
-type ClientOption func(*AsynqClient)
-
-func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt, opts ...ClientOption) *AsynqClient {
+func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
 	client := asynq.NewClient(redisOpt)
 
 	c := &AsynqClient{
 		name:   name,
 		client: client,
-	}
-
-	for _, opt := range opts {
-		opt(c)
 	}
 
 	c.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
