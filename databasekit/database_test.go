@@ -85,11 +85,14 @@ func TestWithDBName(t *testing.T) {
 	}
 }
 
-func TestWithConnectionString(t *testing.T) {
+func TestWithConnectRetry(t *testing.T) {
 	db := &PostgresDB{}
-	WithConnectionString("postgres://user:pass@host:5432/mydb")(db)
-	if db.connStr != "postgres://user:pass@host:5432/mydb" {
-		t.Errorf("unexpected connStr: %q", db.connStr)
+	WithConnectRetry(5, 2*time.Second)(db)
+	if db.retryAttempts != 5 {
+		t.Errorf("expected 5 retry attempts, got %d", db.retryAttempts)
+	}
+	if db.retryBackoff != 2*time.Second {
+		t.Errorf("expected 2s backoff, got %v", db.retryBackoff)
 	}
 }
 
@@ -168,11 +171,16 @@ func TestNewPostgresDBValidation(t *testing.T) {
 			connStr: "://not-a-valid-dsn",
 			wantErr: true,
 		},
+		{
+			name:    "empty connection string",
+			connStr: "",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewPostgresDB(WithConnectionString(tt.connStr))
+			_, err := NewPostgresDB(tt.connStr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewPostgresDB() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -180,14 +188,15 @@ func TestNewPostgresDBValidation(t *testing.T) {
 	}
 }
 
-func TestLazyProviderBlocksUntilContextDeadline(t *testing.T) {
+func TestTxManagerBlocksUntilContextDeadline(t *testing.T) {
 	db := &PostgresDB{}
-	provider := db.TxProvider()
+	tm := NewTxManager(db.TxProvider())
+	querier := tm.QuerierFromContext(context.Background())
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := provider.Exec(ctx, "SELECT 1")
+	_, err := querier.Exec(ctx, "SELECT 1")
 	if err == nil {
 		t.Fatal("expected error due to deadline, got nil")
 	}
@@ -196,14 +205,15 @@ func TestLazyProviderBlocksUntilContextDeadline(t *testing.T) {
 	}
 }
 
-func TestLazyProviderQueryRowReturnsError(t *testing.T) {
+func TestTxManagerQueryRowReturnsError(t *testing.T) {
 	db := &PostgresDB{}
-	provider := db.TxProvider()
+	tm := NewTxManager(db.TxProvider())
+	querier := tm.QuerierFromContext(context.Background())
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	row := provider.QueryRow(ctx, "SELECT 1")
+	row := querier.QueryRow(ctx, "SELECT 1")
 	var val int
 	err := row.Scan(&val)
 	if err == nil {

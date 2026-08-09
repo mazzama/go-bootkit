@@ -251,3 +251,30 @@ func TestNewHTTPServerValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestNewDefaultHandlerWithMiddleware(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	agg := healthkit.NewAggregator(0)
+
+	recordingMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Custom-Middleware", "applied")
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := NewDefaultHandler(agg, logger, WithMiddleware(recordingMiddleware))
+
+	req := httptest.NewRequest(http.MethodGet, "/health/liveness", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK from health endpoint, got %d", rec.Code)
+	}
+
+	if rec.Header().Get("X-Custom-Middleware") != "applied" {
+		t.Errorf("expected custom middleware to be applied, got header: %s", rec.Header().Get("X-Custom-Middleware"))
+	}
+}

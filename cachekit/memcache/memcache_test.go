@@ -100,3 +100,33 @@ func TestMemoryCache(t *testing.T) {
 		t.Fatalf("expected error when setting unmarshalable value")
 	}
 }
+
+type customCodec struct{}
+
+func (customCodec) Marshal(v any) ([]byte, error) {
+	return []byte("prefix:" + v.(string)), nil
+}
+
+func (customCodec) Unmarshal(data []byte, dest any) error {
+	*(dest.(*string)) = string(data[7:])
+	return nil
+}
+
+func TestMemoryCacheWithCustomCodec(t *testing.T) {
+	cache := memcache.New(memcache.WithCodec(customCodec{}))
+	ctx := context.Background()
+
+	err := cache.Set(ctx, "k", "val", time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected set error: %v", err)
+	}
+
+	var res string
+	err = cache.Get(ctx, "k", &res)
+	if err != nil {
+		t.Fatalf("unexpected get error: %v", err)
+	}
+	if res != "val" {
+		t.Fatalf("expected 'val', got %q", res)
+	}
+}

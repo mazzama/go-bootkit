@@ -10,6 +10,53 @@ import (
 
 type txKey struct{}
 
+type readyable interface {
+	Ready() <-chan struct{}
+}
+
+type errRow struct{ err error }
+
+func (e errRow) Scan(dest ...any) error {
+	return e.err
+}
+
+type readyQuerier struct {
+	provider TxProvider
+}
+
+func (r readyQuerier) wait(ctx context.Context) error {
+	if rd, ok := r.provider.(readyable); ok {
+		select {
+		case <-rd.Ready():
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("pool not ready: %w", ctx.Err())
+		}
+	}
+	return nil
+}
+
+func (r readyQuerier) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+	if err := r.wait(ctx); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	return r.provider.Exec(ctx, sql, arguments...)
+}
+
+func (r readyQuerier) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	if err := r.wait(ctx); err != nil {
+		return nil, err
+	}
+	return r.provider.Query(ctx, sql, args...)
+}
+
+func (r readyQuerier) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	if err := r.wait(ctx); err != nil {
+		return errRow{err: err}
+	}
+	return r.provider.QueryRow(ctx, sql, args...)
+}
+
 // QuerierResolver resolves a Querier from context, allowing repositories to depend
 // on a seam rather than the concrete TxManager.
 type QuerierResolver interface {
@@ -47,6 +94,9 @@ func (tm *TxManager) QuerierFromContext(ctx context.Context) Querier {
 	if tx, ok := TxFromContext(ctx); ok {
 		return tx
 	}
+	if _, ok := tm.provider.(readyable); ok {
+		return readyQuerier{provider: tm.provider}
+	}
 	return tm.provider
 }
 
@@ -64,6 +114,13 @@ func (tm *TxManager) WithTx(ctx context.Context, fn func(ctx context.Context) er
 			return fmt.Errorf("failed to begin nested transaction (savepoint): %w", err)
 		}
 	} else {
+		if rd, ok := tm.provider.(readyable); ok {
+			select {
+			case <-rd.Ready():
+			case <-ctx.Done():
+				return fmt.Errorf("pool not ready: %w", ctx.Err())
+			}
+		}
 		// Begin a new transaction from the provider
 		tx, err = tm.provider.Begin(ctx)
 		if err != nil {

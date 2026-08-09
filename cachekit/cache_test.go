@@ -15,11 +15,24 @@ func TestWithName(t *testing.T) {
 	}
 }
 
-func TestWithAddress(t *testing.T) {
+func TestWithConnectRetry(t *testing.T) {
 	cache := &RedisCache{options: defaultOptions()}
-	WithAddress("redis:6380")(cache)
-	if cache.options.Addr != "redis:6380" {
-		t.Errorf("expected 'redis:6380', got %q", cache.options.Addr)
+	WithConnectRetry(3, 100)(cache)
+	if cache.retryAttempts != 3 {
+		t.Errorf("expected 3, got %d", cache.retryAttempts)
+	}
+	if cache.retryBackoff != 100 {
+		t.Errorf("expected 100, got %d", cache.retryBackoff)
+	}
+
+	// Should not set if maxAttempts or backoff <= 0
+	WithConnectRetry(0, 100)(cache)
+	if cache.retryAttempts != 3 {
+		t.Errorf("expected 3, got %d", cache.retryAttempts)
+	}
+	WithConnectRetry(5, 0)(cache)
+	if cache.retryAttempts != 3 {
+		t.Errorf("expected 3, got %d", cache.retryAttempts)
 	}
 }
 
@@ -44,6 +57,14 @@ func TestWithUsername(t *testing.T) {
 	WithUsername("admin")(cache)
 	if cache.options.Username != "admin" {
 		t.Errorf("expected 'admin', got %q", cache.options.Username)
+	}
+}
+func TestWithCodec(t *testing.T) {
+	cache := &RedisCache{}
+	codec := JSONCodec{}
+	WithCodec(codec)(cache)
+	if cache.codec == nil {
+		t.Error("expected codec to be set")
 	}
 }
 
@@ -134,7 +155,7 @@ func TestNewRedisCacheValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewRedisCache(WithAddress(tt.addr))
+			_, err := NewRedisCache(tt.addr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewRedisCache() error = %v, wantErr %v", err, tt.wantErr)
 			}

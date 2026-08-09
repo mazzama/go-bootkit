@@ -115,7 +115,8 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 }
 
 type RouterOptions struct {
-	Timeout time.Duration
+	Timeout     time.Duration
+	Middlewares []func(http.Handler) http.Handler
 }
 
 type RouterOption func(*RouterOptions)
@@ -126,6 +127,13 @@ func WithRouterTimeout(d time.Duration) RouterOption {
 		if d > 0 {
 			o.Timeout = d
 		}
+	}
+}
+
+// WithMiddleware appends custom middlewares to the router options.
+func WithMiddleware(middlewares ...func(http.Handler) http.Handler) RouterOption {
+	return func(o *RouterOptions) {
+		o.Middlewares = append(o.Middlewares, middlewares...)
 	}
 }
 
@@ -151,6 +159,12 @@ func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger, opts .
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Recoverer)
+
+	// User-supplied middleware injected here
+	for _, mw := range options.Middlewares {
+		router.Use(mw)
+	}
+
 	router.Use(middleware.Timeout(options.Timeout))
 
 	// Setup health routes if aggregator is provided

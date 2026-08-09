@@ -23,7 +23,7 @@ func TestHealthChecks(t *testing.T) {
 	if len(checks) != 2 { // liveness and readiness
 		t.Fatalf("expected 2 checks, got %d", len(checks))
 	}
-	
+
 	checksClient := client.HealthChecks()
 	if len(checksClient) != 2 {
 		t.Fatalf("expected 2 checks, got %d", len(checksClient))

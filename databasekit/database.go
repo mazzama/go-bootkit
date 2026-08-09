@@ -2,8 +2,11 @@ package databasekit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -15,20 +18,26 @@ import (
 type PostgresDB struct {
 	core.Lifecycle
 
-	pool     *pgxpool.Pool
-	name     string
-	connStr  string
-	logger   *slog.Logger
-	maxConns int32
-	minConns int32
+	pool          *pgxpool.Pool
+	name          string
+	connStr       string
+	logger        *slog.Logger
+	maxConns      int32
+	minConns      int32
+	retryAttempts int
+	retryBackoff  time.Duration
 }
 
 type PostgresOption func(*PostgresDB)
 
-func NewPostgresDB(options ...PostgresOption) (*PostgresDB, error) {
+func NewPostgresDB(connStr string, options ...PostgresOption) (*PostgresDB, error) {
+	if connStr == "" {
+		return nil, errors.New("connection string cannot be empty")
+	}
+
 	db := &PostgresDB{
 		name:    "postgres-db",
-		connStr: "postgres://postgres:postgres@localhost:5432/postgres",
+		connStr: connStr,
 	}
 
 	for _, option := range options {
@@ -41,12 +50,45 @@ func NewPostgresDB(options ...PostgresOption) (*PostgresDB, error) {
 	}
 
 	db.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
-		pool, err := pgxpool.NewWithConfig(ctx, config)
+		var pool *pgxpool.Pool
+		var err error
+		var errPing error
+
+		attempts := db.retryAttempts
+		if attempts <= 0 {
+			attempts = 1
+		}
+
+		for attempt := 0; attempt < attempts; attempt++ {
+			pool, err = pgxpool.NewWithConfig(ctx, config)
+			if err == nil {
+				errPing = pool.Ping(ctx)
+				if errPing == nil {
+					break
+				}
+				pool.Close()
+			}
+
+			if attempt < attempts-1 {
+				backoff := db.retryBackoff * time.Duration(1<<attempt)
+				jitter := time.Duration(0)
+				if half := int64(db.retryBackoff / 2); half > 0 {
+					jitter = time.Duration(rand.Int64N(half))
+				}
+				sleepDuration := backoff + jitter
+
+				select {
+				case <-ctx.Done():
+					return nil, fmt.Errorf("context canceled during retry backoff: %w", ctx.Err())
+				case <-time.After(sleepDuration):
+				}
+			}
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to create connection pool: %w", err)
 		}
-
-		if errPing := pool.Ping(ctx); errPing != nil {
+		if errPing != nil {
 			return nil, fmt.Errorf("failed to connect to database: %w", errPing)
 		}
 
@@ -119,9 +161,12 @@ func WithLogger(logger *slog.Logger) PostgresOption {
 	}
 }
 
-func WithConnectionString(connStr string) PostgresOption {
+func WithConnectRetry(maxAttempts int, backoff time.Duration) PostgresOption {
 	return func(db *PostgresDB) {
-		db.connStr = connStr
+		if maxAttempts > 0 && backoff > 0 {
+			db.retryAttempts = maxAttempts
+			db.retryBackoff = backoff
+		}
 	}
 }
 
@@ -146,59 +191,35 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 var _ core.Component = (*PostgresDB)(nil)
 var _ core.Readyable = (*PostgresDB)(nil)
 
-type errRow struct{ err error }
-
-func (e errRow) Scan(dest ...any) error {
-	return e.err
-}
-
-type lazyProvider struct {
-	db *PostgresDB
-}
-
-func (p lazyProvider) wait(ctx context.Context) error {
-	select {
-	case <-p.db.Ready():
-		if p.db.Pool() == nil {
-			return fmt.Errorf("database pool is not initialized")
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("pool not ready: %w", ctx.Err())
+func (db *PostgresDB) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+	if db.pool == nil {
+		return pgconn.CommandTag{}, errors.New("database pool is not initialized")
 	}
+	return db.pool.Exec(ctx, sql, arguments...)
 }
 
-func (p lazyProvider) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
-	if err := p.wait(ctx); err != nil {
-		return pgconn.CommandTag{}, err
+func (db *PostgresDB) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	if db.pool == nil {
+		return nil, errors.New("database pool is not initialized")
 	}
-	return p.db.Pool().Exec(ctx, sql, arguments...)
+	return db.pool.Query(ctx, sql, args...)
 }
 
-func (p lazyProvider) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	if err := p.wait(ctx); err != nil {
-		return nil, err
+func (db *PostgresDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	if db.pool == nil {
+		return errRow{err: errors.New("database pool is not initialized")}
 	}
-	return p.db.Pool().Query(ctx, sql, args...)
+	return db.pool.QueryRow(ctx, sql, args...)
 }
 
-func (p lazyProvider) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	if err := p.wait(ctx); err != nil {
-		return errRow{err: err}
+func (db *PostgresDB) Begin(ctx context.Context) (pgx.Tx, error) {
+	if db.pool == nil {
+		return nil, errors.New("database pool is not initialized")
 	}
-	return p.db.Pool().QueryRow(ctx, sql, args...)
+	return db.pool.Begin(ctx)
 }
 
-func (p lazyProvider) Begin(ctx context.Context) (pgx.Tx, error) {
-	if err := p.wait(ctx); err != nil {
-		return nil, err
-	}
-	return p.db.Pool().Begin(ctx)
-}
-
-// TxProvider returns a databasekit.TxProvider that waits for the database pool
-// to become ready before executing queries. This allows consumers to wire their
-// transaction managers and repositories before calling runner.Run().
+// TxProvider returns the PostgresDB instance directly as a TxProvider.
 func (db *PostgresDB) TxProvider() TxProvider {
-	return lazyProvider{db: db}
+	return db
 }

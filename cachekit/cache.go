@@ -5,12 +5,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"time"
 
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/redis/go-redis/v9"
 )
+
+// Codec defines the interface for cache value serialization and deserialization.
+type Codec interface {
+	Marshal(v any) ([]byte, error)
+	Unmarshal(data []byte, v any) error
+}
+
+// JSONCodec is the default Codec implementation using encoding/json.
+type JSONCodec struct{}
+
+func (JSONCodec) Marshal(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+func (JSONCodec) Unmarshal(data []byte, v any) error {
+	return json.Unmarshal(data, v)
+}
+
+// DefaultCodec is the default JSON codec used by RedisCache and MemoryCache.
+var DefaultCodec Codec = JSONCodec{}
 
 // Cache is the interface for generic cache operations. RedisCache satisfies it;
 // for tests, use memcache.New() from the cachekit/memcache sub-package.
@@ -24,19 +45,25 @@ type Cache interface {
 type RedisCache struct {
 	core.Lifecycle
 
-	client  *redis.Client
-	options *redis.Options
-	name    string
-	logger  *slog.Logger
+	client        *redis.Client
+	options       *redis.Options
+	codec         Codec
+	name          string
+	logger        *slog.Logger
+	retryAttempts int
+	retryBackoff  time.Duration
 }
-
 type RedisOption func(*RedisCache)
 
-func NewRedisCache(options ...RedisOption) (*RedisCache, error) {
+func NewRedisCache(addr string, options ...RedisOption) (*RedisCache, error) {
+	if addr == "" {
+		return nil, fmt.Errorf("redis address cannot be empty")
+	}
+
 	cache := &RedisCache{
 		name: "redis-cache",
 		options: &redis.Options{
-			Addr:     "localhost:6379",
+			Addr:     addr,
 			Password: "",
 			DB:       0,
 		},
@@ -46,15 +73,39 @@ func NewRedisCache(options ...RedisOption) (*RedisCache, error) {
 		option(cache)
 	}
 
-	if cache.options.Addr == "" {
-		return nil, fmt.Errorf("redis address cannot be empty")
-	}
-
 	cache.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
-		client := redis.NewClient(cache.options)
+		var client *redis.Client
+		var err error
 
-		if err := client.Ping(ctx).Err(); err != nil {
-			return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+		if cache.retryAttempts > 0 {
+			for attempt := 0; attempt < cache.retryAttempts; attempt++ {
+				client = redis.NewClient(cache.options)
+				if err = client.Ping(ctx).Err(); err == nil {
+					break
+				}
+				_ = client.Close()
+				if attempt < cache.retryAttempts-1 {
+					jitter := time.Duration(rand.Int64N(int64(cache.retryBackoff) / 2))
+					backoff := cache.retryBackoff*(1<<attempt) + jitter
+
+					timer := time.NewTimer(backoff)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return nil, ctx.Err()
+					case <-timer.C:
+					}
+				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect to Redis after retries: %w", err)
+			}
+		} else {
+			client = redis.NewClient(cache.options)
+			if err = client.Ping(ctx).Err(); err != nil {
+				_ = client.Close()
+				return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+			}
 		}
 
 		cache.client = client
@@ -79,9 +130,12 @@ func WithLogger(logger *slog.Logger) RedisOption {
 	}
 }
 
-func WithAddress(addr string) RedisOption {
+func WithConnectRetry(maxAttempts int, backoff time.Duration) RedisOption {
 	return func(r *RedisCache) {
-		r.options.Addr = addr
+		if maxAttempts > 0 && backoff > 0 {
+			r.retryAttempts = maxAttempts
+			r.retryBackoff = backoff
+		}
 	}
 }
 
@@ -103,6 +157,14 @@ func WithUsername(username string) RedisOption {
 	}
 }
 
+func WithCodec(codec Codec) RedisOption {
+	return func(r *RedisCache) {
+		if codec != nil {
+			r.codec = codec
+		}
+	}
+}
+
 func (r *RedisCache) Name() string {
 	return r.name
 }
@@ -111,8 +173,15 @@ func (r *RedisCache) Client() *redis.Client {
 	return r.client
 }
 
+func (r *RedisCache) codecOrDefault() Codec {
+	if r.codec != nil {
+		return r.codec
+	}
+	return DefaultCodec
+}
+
 func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
-	b, err := json.Marshal(value)
+	b, err := r.codecOrDefault().Marshal(value)
 	if err != nil {
 		return err
 	}
@@ -124,7 +193,7 @@ func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal([]byte(str), dest)
+	return r.codecOrDefault().Unmarshal([]byte(str), dest)
 }
 
 func (r *RedisCache) Delete(ctx context.Context, key string) error {

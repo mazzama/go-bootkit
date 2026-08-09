@@ -2,7 +2,6 @@ package memcache
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -14,15 +13,40 @@ import (
 // It does not support TTL expiration — entries persist until explicitly deleted
 // or the cache is reset.
 type MemoryCache struct {
-	mu   sync.Mutex
-	data map[string]string
+	mu    sync.Mutex
+	data  map[string]string
+	codec cachekit.Codec
 }
 
 var _ cachekit.Cache = (*MemoryCache)(nil)
 
+type Option func(*MemoryCache)
+
+// WithCodec sets a custom Codec for MemoryCache.
+func WithCodec(codec cachekit.Codec) Option {
+	return func(c *MemoryCache) {
+		if codec != nil {
+			c.codec = codec
+		}
+	}
+}
+
 // New creates a ready-to-use MemoryCache.
-func New() *MemoryCache {
-	return &MemoryCache{data: make(map[string]string)}
+func New(opts ...Option) *MemoryCache {
+	c := &MemoryCache{
+		data: make(map[string]string),
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+func (c *MemoryCache) codecOrDefault() cachekit.Codec {
+	if c.codec != nil {
+		return c.codec
+	}
+	return cachekit.DefaultCodec
 }
 
 func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
@@ -32,13 +56,13 @@ func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
 	if !ok {
 		return fmt.Errorf("cache miss: %s", key)
 	}
-	return json.Unmarshal([]byte(v), dest)
+	return c.codecOrDefault().Unmarshal([]byte(v), dest)
 }
 
 func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	b, err := json.Marshal(value)
+	b, err := c.codecOrDefault().Marshal(value)
 	if err != nil {
 		return err
 	}
