@@ -77,4 +77,10 @@ func TestMemoryCache(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on cache miss")
 	}
+
+	// Test Set with unmarshalable value (e.g. channel) to cover error path
+	err = cache.Set(ctx, "unmarshalable", make(chan int), time.Minute)
+	if err == nil {
+		t.Fatalf("expected error when setting unmarshalable value")
+	}
 }
