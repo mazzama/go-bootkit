@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
+	"github.com/mazzama/go-bootkit/core/retry"
 )
 
 type PostgresDB struct {
@@ -51,47 +51,27 @@ func NewPostgresDB(connStr string, options ...PostgresOption) (*PostgresDB, erro
 
 	db.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
 		var pool *pgxpool.Pool
-		var err error
-		var errPing error
 
 		attempts := db.retryAttempts
 		if attempts <= 0 {
 			attempts = 1
 		}
 
-		for attempt := 0; attempt < attempts; attempt++ {
-			pool, err = pgxpool.NewWithConfig(ctx, config)
-			if err == nil {
-				errPing = pool.Ping(ctx)
-				if errPing == nil {
-					break
-				}
-				pool.Close()
+		err := retry.Do(ctx, attempts, db.retryBackoff, func(ctx context.Context) error {
+			p, createErr := pgxpool.NewWithConfig(ctx, config)
+			if createErr != nil {
+				return createErr
 			}
-
-			if attempt < attempts-1 {
-				backoff := db.retryBackoff * time.Duration(1<<attempt)
-				jitter := time.Duration(0)
-				if half := int64(db.retryBackoff / 2); half > 0 {
-					jitter = time.Duration(rand.Int64N(half))
-				}
-				sleepDuration := backoff + jitter
-
-				timer := time.NewTimer(sleepDuration)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return nil, fmt.Errorf("context canceled during retry backoff: %w", ctx.Err())
-				case <-timer.C:
-				}
+			pingErr := p.Ping(ctx)
+			if pingErr != nil {
+				p.Close()
+				return pingErr
 			}
-		}
-
+			pool = p
+			return nil
+		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create connection pool: %w", err)
-		}
-		if errPing != nil {
-			return nil, fmt.Errorf("failed to connect to database: %w", errPing)
+			return nil, fmt.Errorf("failed to connect to database: %w", err)
 		}
 
 		db.pool = pool
@@ -191,7 +171,6 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 }
 
 var _ core.Component = (*PostgresDB)(nil)
-var _ core.Readyable = (*PostgresDB)(nil)
 
 func (db *PostgresDB) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
 	if db.pool == nil {

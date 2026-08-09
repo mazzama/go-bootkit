@@ -39,20 +39,30 @@ func TestAsynqClient_LifecycleAndEnqueue(t *testing.T) {
 	}
 
 	task := asynq.NewTask("test:task", []byte("payload"))
-	info, err := client.Enqueue(task)
+	info, err := client.EnqueueWithAsynq(task)
 	if err != nil {
-		t.Fatalf("Enqueue failed: %v", err)
+		t.Fatalf("EnqueueWithAsynq failed: %v", err)
 	}
 	if info.Type != "test:task" {
 		t.Errorf("unexpected task type: %s", info.Type)
 	}
 
-	infoCtx, err := client.EnqueueContext(ctx, asynq.NewTask("test:ctx", nil))
+	infoCtx, err := client.EnqueueContextWithAsynq(ctx, asynq.NewTask("test:ctx", nil))
 	if err != nil {
-		t.Fatalf("EnqueueContext failed: %v", err)
+		t.Fatalf("EnqueueContextWithAsynq failed: %v", err)
 	}
 	if infoCtx.Type != "test:ctx" {
 		t.Errorf("unexpected task type: %s", infoCtx.Type)
+	}
+
+	// Also test the Enqueuer interface path.
+	ftask := workerkit.Task{Type: "test:framework", Payload: []byte("fw-payload")}
+	fwInfo, fwErr := client.Enqueue(ftask)
+	if fwErr != nil {
+		t.Fatalf("Enqueue (framework Task) failed: %v", fwErr)
+	}
+	if fwInfo.Type != "test:framework" {
+		t.Errorf("unexpected fw task type: %s", fwInfo.Type)
 	}
 
 	err = client.Stop(ctx)
@@ -65,9 +75,8 @@ func TestAsynqClient_Enqueue_NotReady(t *testing.T) {
 	redisOpt := asynq.RedisClientOpt{Addr: "localhost:9999"}
 	client := workerkit.NewAsynqClient("test-client", redisOpt)
 
-	task := asynq.NewTask("test:task", nil)
+	task := workerkit.Task{Type: "test:task"}
 
-	// Create a cancelled context for EnqueueContext
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

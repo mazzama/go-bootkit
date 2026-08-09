@@ -12,10 +12,6 @@ type Component interface {
 	Stop(ctx context.Context) error
 }
 
-type Readyable interface {
-	Ready() <-chan struct{}
-}
-
 type HealthCheckProvider interface {
 	HealthChecks() []healthkit.Check
 }

@@ -246,4 +246,3 @@ func (s *HTTPServer) HealthChecks() []healthkit.Check {
 }
 
 var _ core.Component = (*HTTPServer)(nil)
-var _ core.Readyable = (*HTTPServer)(nil)

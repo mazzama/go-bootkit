@@ -174,7 +174,7 @@ func TestPostgresDBConnectRetryContextCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected context error")
 	}
-	if !strings.Contains(err.Error(), "context canceled during retry backoff") {
+	if !strings.Contains(err.Error(), "context canceled") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
