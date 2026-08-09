@@ -35,7 +35,7 @@ server := workerkit.NewAsynqServer(
 )
 
 // Define your task handlers
-server.HandleFunc("email:deliver", HandleEmailDelivery)
+server.Mux().HandleFunc("email:deliver", HandleEmailDelivery)
 
 // Pass to the application runner
 runner := core.NewApplicationRunner(

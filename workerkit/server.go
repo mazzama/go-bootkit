@@ -83,8 +83,8 @@ func NewAsynqServer(name string, redisOpt asynq.RedisConnOpt, opts ...ServerOpti
 	return s
 }
 
-func (s *AsynqServer) HandleFunc(pattern string, handler func(context.Context, *asynq.Task) error) {
-	s.mux.HandleFunc(pattern, handler)
+func (s *AsynqServer) Mux() *asynq.ServeMux {
+	return s.mux
 }
 
 func (s *AsynqServer) Name() string {
@@ -92,14 +92,7 @@ func (s *AsynqServer) Name() string {
 }
 
 func (s *AsynqServer) HealthChecks() []healthkit.Check {
-	return healthkit.StandardChecks(s.name, func(ctx context.Context) error {
-		select {
-		case <-s.Ready():
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	})
+	return asynqHealthChecks(s.name, s.Ready())
 }
 
 var _ core.Component = (*AsynqServer)(nil)

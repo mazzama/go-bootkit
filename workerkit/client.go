@@ -15,12 +15,18 @@ type AsynqClient struct {
 	client *asynq.Client
 }
 
-func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
+type ClientOption func(*AsynqClient)
+
+func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt, opts ...ClientOption) *AsynqClient {
 	client := asynq.NewClient(redisOpt)
 
 	c := &AsynqClient{
 		name:   name,
 		client: client,
+	}
+
+	for _, opt := range opts {
+		opt(c)
 	}
 
 	c.Lifecycle = core.NewLifecycle(func(ctx context.Context) (func(context.Context) error, error) {
@@ -56,14 +62,7 @@ func (c *AsynqClient) Name() string {
 }
 
 func (c *AsynqClient) HealthChecks() []healthkit.Check {
-	return healthkit.StandardChecks(c.name, func(ctx context.Context) error {
-		select {
-		case <-c.Ready():
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	})
+	return asynqHealthChecks(c.name, c.Ready())
 }
 
 var _ core.Component = (*AsynqClient)(nil)
