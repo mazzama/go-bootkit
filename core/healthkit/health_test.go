@@ -459,3 +459,38 @@ func TestErrorsJoin(t *testing.T) {
 		t.Fatalf("expected 2 wrapped errors, got %v", len(errList))
 	}
 }
+
+func TestHealthHookIsCalled(t *testing.T) {
+	agg := NewAggregator(0)
+	agg.Register(Check{
+		Name: "hook-check",
+		Kind: Liveness,
+		Fn:   func(ctx context.Context) error { return errors.New("boom") },
+	})
+
+	var called bool
+	var calledKind Kind
+	var calledErr error
+	var calledDur time.Duration
+	agg.SetHook(func(kind Kind, duration time.Duration, err error) {
+		called = true
+		calledKind = kind
+		calledErr = err
+		calledDur = duration
+	})
+
+	_ = agg.evaluate(context.Background(), Liveness)
+
+	if !called {
+		t.Fatal("expected hook to be called")
+	}
+	if calledKind != Liveness {
+		t.Errorf("expected Liveness, got %v", calledKind)
+	}
+	if calledErr == nil || !strings.Contains(calledErr.Error(), "boom") {
+		t.Errorf("expected boom error, got %v", calledErr)
+	}
+	if calledDur <= 0 {
+		t.Errorf("expected positive duration, got %v", calledDur)
+	}
+}
