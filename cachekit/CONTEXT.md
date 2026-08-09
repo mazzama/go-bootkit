@@ -12,5 +12,5 @@ It is part of the core infrastructure layer of the application.
 
 ## Architecture
 
-- `RedisCache` embeds `core.Lifecycle` for robust start/stop handling, and implements `Readyable` and `HealthCheckProvider`. Health checks are delegated to `healthkit.StandardChecks`.
+- `RedisCache` embeds `core.Lifecycle` for robust start/stop handling, and implements `HealthCheckProvider`. Health checks are delegated to `healthkit.StandardChecks`. Connection retry uses `core/retry.Do`.
 - `healthkit.StandardChecks` provides lightweight no-op liveness checks and timed backend-ping readiness checks.

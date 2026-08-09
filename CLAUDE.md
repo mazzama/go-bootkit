@@ -10,14 +10,15 @@ Go Boot Kit is a multi-module Go library providing reusable components for build
 
 ```
 core/           - Foundation module with Component interface and ApplicationRunner
-  component.go  - Component and Readyable interfaces
+  component.go  - Component and HealthCheckProvider interfaces
   runner.go     - ApplicationRunner for orchestrating services with graceful shutdown
+  retry/        - Exponential-backoff retry with jitter (shared by databasekit, cachekit)
   healthkit/    - Health check aggregator (Liveness, Readiness, Startup probes)
 
 cachekit/       - Redis cache component implementing core.Component
 databasekit/    - PostgreSQL component implementing core.Component
 serverkit/      - HTTP server component (chi router) implementing core.Component
-```
+workerkit/      - Redis-backed background job processor (asynq) implementing core.Component
 
 ## Key Architecture Patterns
 
@@ -31,30 +32,42 @@ type Component interface {
 }
 ```
 
-Services that need startup coordination also implement `core.Readyable`:
-```go
-type Readyable interface {
-    Ready() <-chan struct{}
-}
-```
+Components that embed `core.Lifecycle` automatically support readiness gating
+(`Ready() <-chan struct{}`). The runner discovers readiness through a type
+assertion on the `Ready()` method — no separate exported interface needed.
 
 ### Functional Options Pattern
 All components use functional options for configuration:
 ```go
 // Example: databasekit
-db, err := databasekit.NewPostgresDB(ctx,
-    databasekit.WithDBName("mydb"),
-    databasekit.WithConnectionString(connStr),
+db, err := databasekit.NewPostgresDB(connStr,
+    databasekit.WithMaxConns(20),
+    databasekit.WithConnectRetry(5, 100*time.Millisecond),
 )
 ```
 
 ### Application Runner
 The `core.ApplicationRunner` orchestrates multiple services:
 - Starts all services concurrently using errgroup
-- Supports start deadlines for Readyable components
+- Supports start deadlines for components that expose `Ready() <-chan struct{}`
 - Handles graceful shutdown on SIGINT/SIGTERM
-- Runs Stop() on all services in parallel during shutdown
+- Runs Stop() on all services sequentially in reverse order during shutdown
 
+### Enqueuer Seam (workerkit)
+The `Enqueuer` interface decouples services from asynq:
+```go
+type Enqueuer interface {
+    Enqueue(task Task, opts ...EnqueueOption) (*TaskInfo, error)
+    EnqueueContext(ctx context.Context, task Task, opts ...EnqueueOption) (*TaskInfo, error)
+}
+```
+Inject `workerkit.NewAsynqClient(...)` in production, `memqueue.New()` in tests.
+Mirrors the `cachekit.Cache` / `memcache.MemoryCache` pattern.
+
+### Retry (core/retry)
+`retry.Do(ctx, maxAttempts, baseBackoff, fn)` provides exponential-backoff retry
+with jitter and context cancellation. Used by `databasekit` and `cachekit` during
+connection setup to tolerate transient backend unavailability.
 ## Commands
 
 ```bash
@@ -70,18 +83,16 @@ go test -v ./...
 # Run tests for a specific package
 go test -v ./healthkit
 
-# Tidy dependencies (run in each module directory)
-go mod tidy
-```
-
 ## Adding New Components
 
 1. Create a new directory for the component (e.g., `newkit/`)
 2. Create a `go.mod` with module path `github.com/mazzama/go-bootkit/newkit`
 3. Import `github.com/mazzama/go-bootkit/core` for the Component interface
 4. Implement the `Component` interface
-5. Optionally implement `Readyable` for startup coordination
+5. Embed `core.Lifecycle` for start/stop/ready semantics
 6. Provide `HealthChecks() []healthkit.Check` method for health integration
+7. Add a CONTEXT.md with glossary and architecture notes
+8. Add the module to CONTEXT-MAP.md and Makefile lint targets
 
 ## Dependencies
 

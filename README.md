@@ -12,15 +12,13 @@ A production-ready Go application framework that integrates multiple components 
 - **Trace-Correlated Logging**: Built-in `TraceHandler` automatically injects `trace_id` and `span_id` from OpenTelemetry into JSON logs.
 - **Transaction Management**: `TxManager` handles nested database transactions seamlessly via `context.Context` and savepoints.
 - **Auto-Wired Health Checks**: Any component that exposes health checks is automatically wired to the health endpoints (`/live`, `/ready`, `/startup`).
+- **Enqueuer Seam**: `workerkit.Enqueuer` interface decouples services from `asynq` — inject an in-memory adapter for tests, the real client for production (same pattern as `Cache`/`MemoryCache`).
 
-## Components
-
-- **Core**: Base interfaces (`Component`), `AppRunner` for lifecycle orchestration, `Lifecycle` primitive for embeddable start/stop semantics, `healthkit` for probes (`StandardChecks`), and `logger` for structured JSON.
-- **CacheKit**: Redis cache integration using `redis/go-redis/v9`.
-- **DatabaseKit**: PostgreSQL integration using `jackc/pgx/v5` and `TxManager` for context-propagated transactions.
+- **Core**: Base interfaces (`Component`, `HealthCheckProvider`), `ApplicationRunner` for lifecycle orchestration, `Lifecycle` primitive for embeddable start/stop semantics, `healthkit` for probes (`StandardChecks`), `retry` for exponential-backoff connection retry, and `logger` for structured JSON with trace correlation.
+- **CacheKit**: Redis cache integration using `redis/go-redis/v9`. Exposes a `Cache` interface with an in-memory test adapter (`memcache`).
+- **DatabaseKit**: PostgreSQL integration using `jackc/pgx/v5` and `TxManager` for context-propagated transactions. Repositories use `QuerierResolver` to work inside and outside transactions.
 - **ServerKit**: HTTP server wrapped around `go-chi/chi/v5` with panic recovery, CORS, and graceful shutdown.
-- **WorkerKit**: Redis-backed background job processor wrapping `hibiken/asynq` with Client and Server components.
-
+- **WorkerKit**: Redis-backed background job processor wrapping `hibiken/asynq`. `Enqueuer` interface decouples callers from asynq; `memqueue.InMemoryClient` test adapter mirrors the cachekit pattern. Client/Server split lets HTTP and worker nodes use only what they need.
 ## Quick Start Example
 
 ```go
