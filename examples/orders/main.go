@@ -12,6 +12,8 @@ import (
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/mazzama/go-bootkit/serverkit"
+	"github.com/mazzama/go-bootkit/workerpool"
+	"github.com/mazzama/go-bootkit/workerpool/memory"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -77,9 +79,20 @@ func run() error {
 	service := NewOrderService(txManager, productRepo, orderRepo, cache, logger)
 	handler := NewHandler(service, logger)
 
+	// Set up background worker pool
+	queue := memory.NewQueue(1000)
+	processor := NewNotificationProcessor(logger)
+	pool := workerpool.NewWorkerPool(
+		"notification-worker",
+		queue,
+		processor,
+		workerpool.WithWorkers(5),
+		workerpool.WithLogger(logger),
+	)
+
 	runner := core.NewApplicationRunner(
 		core.WithLogger(logger),
-		core.WithServices(db, cache),
+		core.WithServices(db, cache, pool),
 	)
 
 	// 6. HTTP server. NewDefaultHandler gives a chi router with health probes,
