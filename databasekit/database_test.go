@@ -213,4 +213,3 @@ func TestLazyProviderQueryRowReturnsError(t *testing.T) {
 		t.Errorf("unexpected error from Scan: %v", err)
 	}
 }
-

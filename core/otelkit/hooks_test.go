@@ -29,7 +29,7 @@ func TestOTelHooks_OnComponentStart(t *testing.T) {
 
 	require.Len(t, rm.ScopeMetrics, 1)
 	metrics := rm.ScopeMetrics[0].Metrics
-	
+
 	// Find bootkit.component.start.duration
 	var startMetric *metricdata.Metrics
 	for _, m := range metrics {
@@ -40,11 +40,11 @@ func TestOTelHooks_OnComponentStart(t *testing.T) {
 		}
 	}
 	require.NotNil(t, startMetric)
-	
+
 	histogram := startMetric.Data.(metricdata.Histogram[int64])
 	require.Len(t, histogram.DataPoints, 1)
 	dp := histogram.DataPoints[0]
-	
+
 	assert.Equal(t, uint64(1), dp.Count)
 	assert.Equal(t, int64(150), dp.Sum)
 }
@@ -77,7 +77,7 @@ func TestOTelHooks_OnHealthEvaluated(t *testing.T) {
 			errorMetric = &mCopy
 		}
 	}
-	
+
 	require.NotNil(t, durationMetric)
 	require.NotNil(t, errorMetric)
 

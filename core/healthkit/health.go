@@ -168,11 +168,11 @@ func (a *Aggregator) evaluate(ctx context.Context, kind Kind) error {
 	})
 
 	duration := time.Since(now)
-	
+
 	a.mu.RLock()
 	hook := a.hook
 	a.mu.RUnlock()
-	
+
 	if hook != nil {
 		hook(kind, duration, err)
 	}

@@ -92,7 +92,7 @@ func (h *OTelHooks) OnHealthEvaluated(kind healthkit.Kind, duration time.Duratio
 		attribute.String("kind", kindStr),
 		attribute.Bool("error", err != nil),
 	}
-	
+
 	h.healthDuration.Record(context.Background(), duration.Milliseconds(), metric.WithAttributes(attrs...))
 	if err != nil {
 		h.healthErrorsTotal.Add(context.Background(), 1, metric.WithAttributes(attrs...))
