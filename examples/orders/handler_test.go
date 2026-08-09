@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -39,6 +40,9 @@ type OrdersSuite struct {
 }
 
 func TestOrdersSuite(t *testing.T) {
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skip("Docker daemon is not running, skipping integration tests")
+	}
 	suite.Run(t, new(OrdersSuite))
 }
 

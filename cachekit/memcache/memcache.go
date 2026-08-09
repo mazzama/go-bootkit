@@ -38,18 +38,11 @@ func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
 func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	switch v := value.(type) {
-	case string:
-		c.data[key] = v
-	case []byte:
-		c.data[key] = string(v)
-	default:
-		b, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-		c.data[key] = string(b)
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
 	}
+	c.data[key] = string(b)
 	return nil
 }
 
