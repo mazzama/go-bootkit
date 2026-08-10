@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/core"
@@ -96,17 +97,15 @@ func run() error {
 		core.WithServices(db, cache, asyncClient, asyncServer),
 	)
 
-	// 6. HTTP server. NewDefaultHandler gives a chi router with health probes,
-	//    request logging, and panic recovery already wired. We mount the example
-	//    routes onto it, then wrap the whole router in the OpenTelemetry HTTP
-	//    middleware. Wrapping at the server level (rather than router.Use) avoids
-	//    chi's "middleware after routes" panic, since the default handler has
-	//    already registered its health routes.
-	router := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
+	// 6. HTTP server. NewDefaultHandler returns an http.Handler pre-configured
+	//    with chi routing, health probes, request logging, and panic recovery.
+	//    Type-assert to mount application routes, then wrap in OpenTelemetry.
+	httpHandler := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
+	router := httpHandler.(*chi.Mux)
 	handler.Routes(router)
 
-	httpHandler := otelhttp.NewHandler(router, "http.server")
-	server, err := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, httpHandler, serverkit.WithLogger(logger))
+	otelHandler := otelhttp.NewHandler(httpHandler, "http.server")
+	server, err := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, otelHandler, serverkit.WithLogger(logger))
 	if err != nil {
 		return err
 	}

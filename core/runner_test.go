@@ -49,6 +49,8 @@ func (m *mockComponent) Ready() <-chan struct{} {
 	return m.readyCh
 }
 
+var _ Readyable = (*mockComponent)(nil)
+
 func TestNewApplicationRunnerDefaults(t *testing.T) {
 	r := NewApplicationRunner()
 

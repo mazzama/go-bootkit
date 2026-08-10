@@ -15,8 +15,12 @@ A runner-managed health check aggregator. Auto-collects health checks from regis
 An interface that allows a service component to declare its internal liveness and readiness checks.
 _Avoid_: HealthChecker, HealthCheckSource
 
+
+**Readyable**:
+An exported interface (`Ready() &lt;-chan struct{}`) signalling that a component has an observable readiness channel. `Lifecycle` implements `Readyable`. The runner and `TxManager` accept `Readyable` rather than duck-typing. New adapters should implement `Readyable` for compile-time safety.
+
 **Lifecycle**:
-An embeddable struct that provides robust, unified lifecycle management (`Start`, `Stop`, `Ready`) for infrastructure adapters. It handles concurrent readiness signals and release-exactly-once semantics. Every infrastructure component embeds `Lifecycle` — the runner discovers readiness through a type assertion on `Ready() <-chan struct{}` without requiring a separate exported interface.
+An embeddable struct that provides robust, unified lifecycle management (`Start`, `Stop`, `Ready`) for infrastructure adapters. It handles concurrent readiness signals and release-exactly-once semantics. `Lifecycle` implements `Readyable`.
 
 **StandardChecks**:
 A builder function in `healthkit` returning standard `Liveness` (nop) and `Readiness` (timed) checks for infrastructure components.

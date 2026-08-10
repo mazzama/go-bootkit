@@ -156,13 +156,9 @@ func (db *PostgresDB) Name() string {
 	return db.name
 }
 
-func (db *PostgresDB) Pool() *pgxpool.Pool {
-	return db.pool
-}
-
 func (db *PostgresDB) HealthChecks() []healthkit.Check {
 	return healthkit.StandardChecks(db.name, func(ctx context.Context) error {
-		pool := db.Pool()
+		pool := db.pool
 		if pool == nil {
 			return fmt.Errorf("db is not initialized")
 		}
@@ -172,35 +168,60 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 
 var _ core.Component = (*PostgresDB)(nil)
 
-func (db *PostgresDB) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+func (db *PostgresDB) exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
 	if db.pool == nil {
 		return pgconn.CommandTag{}, errors.New("database pool is not initialized")
 	}
 	return db.pool.Exec(ctx, sql, arguments...)
 }
 
-func (db *PostgresDB) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (db *PostgresDB) query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	if db.pool == nil {
 		return nil, errors.New("database pool is not initialized")
 	}
 	return db.pool.Query(ctx, sql, args...)
 }
 
-func (db *PostgresDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (db *PostgresDB) queryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	if db.pool == nil {
 		return errRow{err: errors.New("database pool is not initialized")}
 	}
 	return db.pool.QueryRow(ctx, sql, args...)
 }
 
-func (db *PostgresDB) Begin(ctx context.Context) (pgx.Tx, error) {
+func (db *PostgresDB) begin(ctx context.Context) (pgx.Tx, error) {
 	if db.pool == nil {
 		return nil, errors.New("database pool is not initialized")
 	}
 	return db.pool.Begin(ctx)
 }
 
-// TxProvider returns the PostgresDB instance directly as a TxProvider.
+// txProviderAdapter wraps a PostgresDB to present only the TxProvider interface.
+type txProviderAdapter struct {
+	db *PostgresDB
+}
+
+func (a txProviderAdapter) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+	return a.db.exec(ctx, sql, arguments...)
+}
+
+func (a txProviderAdapter) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	return a.db.query(ctx, sql, args...)
+}
+
+func (a txProviderAdapter) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	return a.db.queryRow(ctx, sql, args...)
+}
+
+func (a txProviderAdapter) Begin(ctx context.Context) (pgx.Tx, error) {
+	return a.db.begin(ctx)
+}
+
+func (a txProviderAdapter) Ready() <-chan struct{} {
+	return a.db.Ready()
+}
+
+// TxProvider returns an adapter that satisfies TxProvider by delegating to the underlying pool.
 func (db *PostgresDB) TxProvider() TxProvider {
-	return db
+	return txProviderAdapter{db: db}
 }
