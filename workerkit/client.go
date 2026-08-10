@@ -36,7 +36,7 @@ func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
 func (c *AsynqClient) Enqueue(task Task, opts ...EnqueueOption) (*TaskInfo, error) {
 	select {
 	case <-c.Ready():
-	case <-context.Background().Done():
+	default:
 		return nil, fmt.Errorf("client not ready")
 	}
 	aTask := asynq.NewTask(task.Type, task.Payload)
@@ -79,8 +79,8 @@ func toAsynqOpts(opts []EnqueueOption) []asynq.Option {
 	if o.Queue != "" {
 		aOpts = append(aOpts, asynq.Queue(o.Queue))
 	}
-	if o.MaxRetry > 0 {
-		aOpts = append(aOpts, asynq.MaxRetry(o.MaxRetry))
+	if o.MaxRetry != nil {
+		aOpts = append(aOpts, asynq.MaxRetry(*o.MaxRetry))
 	}
 	if !o.Deadline.IsZero() {
 		aOpts = append(aOpts, asynq.Deadline(o.Deadline))
@@ -108,12 +108,20 @@ func toAsynqOpts(opts []EnqueueOption) []asynq.Option {
 
 func fromAsynqInfo(info *asynq.TaskInfo) *TaskInfo {
 	return &TaskInfo{
-		ID:    info.ID,
-		Type:  info.Type,
-		Queue: info.Queue,
-		State: fmt.Sprintf("%d", info.State),
+		ID:            info.ID,
+		Type:          info.Type,
+		Queue:         info.Queue,
+		State:         info.State.String(),
+		NextProcessAt: info.NextProcessAt,
+		Retention:     info.Retention,
+		CompletedAt:   info.CompletedAt,
+		Result:        info.Result,
+		LastErr:       info.LastErr,
+		LastFailedAt:  info.LastFailedAt,
 	}
 }
+
+var _ core.Readyable = (*AsynqClient)(nil)
 
 var _ core.Component = (*AsynqClient)(nil)
 var _ Enqueuer = (*AsynqClient)(nil)

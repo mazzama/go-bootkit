@@ -31,10 +31,11 @@ func TestAsynqClient_LifecycleAndEnqueue(t *testing.T) {
 	go func() {
 		errCh <- client.Start(ctx)
 	}()
-
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
 	select {
 	case <-client.Ready():
-	case <-time.After(time.Second):
+	case <-timer.C:
 		t.Fatal("client did not become ready")
 	}
 	// Test EnqueueContext path

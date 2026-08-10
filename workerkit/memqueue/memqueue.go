@@ -65,7 +65,7 @@ func (c *InMemoryClient) Enqueue(task workerkit.Task, opts ...workerkit.EnqueueO
 // real AsynqClient behavior.
 func (c *InMemoryClient) EnqueueContext(ctx context.Context, task workerkit.Task, opts ...workerkit.EnqueueOption) (*workerkit.TaskInfo, error) {
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("enqueue context cancelled: %w", ctx.Err())
+		return nil, ctx.Err()
 	}
 	var options workerkit.EnqueueOptions
 	for _, fn := range opts {
@@ -87,6 +87,6 @@ func (c *InMemoryClient) enqueue(task workerkit.Task, opts workerkit.EnqueueOpti
 	return &workerkit.TaskInfo{
 		ID:    fmt.Sprintf("mem-%d", len(c.tasks)),
 		Type:  task.Type,
-		State: "enqueued",
+		State: "pending",
 	}
 }

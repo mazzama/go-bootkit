@@ -19,7 +19,7 @@ func TestInMemoryClientEnqueue(t *testing.T) {
 	if info.Type != "email:send" {
 		t.Errorf("expected email:send, got %s", info.Type)
 	}
-	if info.State != "enqueued" {
+	if info.State != "pending" {
 		t.Errorf("expected enqueued, got %s", info.State)
 	}
 
