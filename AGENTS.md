@@ -42,6 +42,8 @@ Available commands: `/caveman lite`, `/caveman full`, `/caveman ultra`, `/cavema
 
 ### Ponytail — lazy senior dev (always-on, full mode)
 
+**Repo context:** This repo is a framework/starter kit. When applying YAGNI, evaluate necessity from the perspective of downstream library consumers. Do not delete public API surface just because it's unused in the repo's internal examples.
+
 Before writing any code, stop at the first rung that holds:
 
 1. Does this need to be built at all? (YAGNI)

@@ -36,7 +36,7 @@ func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
 func (c *AsynqClient) Enqueue(task Task, opts ...EnqueueOption) (*TaskInfo, error) {
 	select {
 	case <-c.Ready():
-	case <-context.Background().Done():
+	default:
 		return nil, fmt.Errorf("client not ready")
 	}
 	aTask := asynq.NewTask(task.Type, task.Payload)
@@ -62,28 +62,6 @@ func (c *AsynqClient) EnqueueContext(ctx context.Context, task Task, opts ...Enq
 	return fromAsynqInfo(info), nil
 }
 
-// EnqueueWithAsynq enqueues a raw *asynq.Task with asynq.Option values.
-// This is the low-level escape hatch; prefer Enqueue through the Enqueuer interface.
-func (c *AsynqClient) EnqueueWithAsynq(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
-	select {
-	case <-c.Ready():
-	case <-context.Background().Done():
-		return nil, fmt.Errorf("client not ready")
-	}
-	return c.client.Enqueue(task, opts...)
-}
-
-// EnqueueContextWithAsynq enqueues a raw *asynq.Task with context propagation.
-// This is the low-level escape hatch; prefer EnqueueContext through the Enqueuer interface.
-func (c *AsynqClient) EnqueueContextWithAsynq(ctx context.Context, task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
-	select {
-	case <-c.Ready():
-	case <-ctx.Done():
-		return nil, fmt.Errorf("client not ready: %w", ctx.Err())
-	}
-	return c.client.EnqueueContext(ctx, task, opts...)
-}
-
 func (c *AsynqClient) Name() string {
 	return c.name
 }
@@ -93,31 +71,57 @@ func (c *AsynqClient) HealthChecks() []healthkit.Check {
 }
 
 func toAsynqOpts(opts []EnqueueOption) []asynq.Option {
-	o := &enqueueOptions{}
+	o := &EnqueueOptions{}
 	for _, fn := range opts {
 		fn(o)
 	}
 	var aOpts []asynq.Option
-	if o.queue != "" {
-		aOpts = append(aOpts, asynq.Queue(o.queue))
+	if o.Queue != "" {
+		aOpts = append(aOpts, asynq.Queue(o.Queue))
 	}
-	if o.maxRetry > 0 {
-		aOpts = append(aOpts, asynq.MaxRetry(o.maxRetry))
+	if o.MaxRetry != nil {
+		aOpts = append(aOpts, asynq.MaxRetry(*o.MaxRetry))
 	}
-	if !o.deadline.IsZero() {
-		aOpts = append(aOpts, asynq.Deadline(o.deadline))
+	if !o.Deadline.IsZero() {
+		aOpts = append(aOpts, asynq.Deadline(o.Deadline))
+	}
+	if o.ProcessIn > 0 {
+		aOpts = append(aOpts, asynq.ProcessIn(o.ProcessIn))
+	}
+	if !o.ProcessAt.IsZero() {
+		aOpts = append(aOpts, asynq.ProcessAt(o.ProcessAt))
+	}
+	if o.Unique > 0 {
+		aOpts = append(aOpts, asynq.Unique(o.Unique))
+	}
+	if o.Timeout > 0 {
+		aOpts = append(aOpts, asynq.Timeout(o.Timeout))
+	}
+	if o.Retention > 0 {
+		aOpts = append(aOpts, asynq.Retention(o.Retention))
+	}
+	if o.Group != "" {
+		aOpts = append(aOpts, asynq.Group(o.Group))
 	}
 	return aOpts
 }
 
 func fromAsynqInfo(info *asynq.TaskInfo) *TaskInfo {
 	return &TaskInfo{
-		ID:    info.ID,
-		Type:  info.Type,
-		Queue: info.Queue,
-		State: fmt.Sprintf("%d", info.State),
+		ID:            info.ID,
+		Type:          info.Type,
+		Queue:         info.Queue,
+		State:         info.State.String(),
+		NextProcessAt: info.NextProcessAt,
+		Retention:     info.Retention,
+		CompletedAt:   info.CompletedAt,
+		Result:        info.Result,
+		LastErr:       info.LastErr,
+		LastFailedAt:  info.LastFailedAt,
 	}
 }
+
+var _ core.Readyable = (*AsynqClient)(nil)
 
 var _ core.Component = (*AsynqClient)(nil)
 var _ Enqueuer = (*AsynqClient)(nil)

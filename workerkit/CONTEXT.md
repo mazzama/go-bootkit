@@ -7,8 +7,8 @@ The `workerkit` module integrates `hibiken/asynq` (a Redis-backed background job
 - **Enqueuer**: Interface for enqueueing background tasks (`Enqueue`, `EnqueueContext`). Accepts framework `Task` values — callers never import `asynq`. `AsynqClient` implements it for production; `InMemoryClient` in `workerkit/memqueue` implements it for tests.
 - **Task**: Framework-native unit of work (`Type string`, `Payload []byte`). Decoupled from `asynq.Task`. Adapters map to backend-specific types internally.
 - **TaskInfo**: Metadata about an enqueued task (`ID`, `Type`, `Queue`, `State`).
-- **EnqueueOption**: Functional options for task enqueueing (`WithQueue`, `WithMaxRetry`, `WithDeadline`). Mapped to asynq options inside `AsynqClient`.
-- **AsynqClient**: Production adapter. Implements `Enqueuer` and `core.Component`. Readiness-gates task enqueueing so callers don't enqueue before the Redis connection is live. Exposes `EnqueueWithAsynq`/`EnqueueContextWithAsynq` as escape hatches for callers with advanced asynq needs.
+- **EnqueueOption**: Functional options for task enqueueing (`WithQueue`, `WithMaxRetry`, `WithDeadline`, `WithProcessIn`, `WithProcessAt`, `WithUnique`, `WithTimeout`, `WithRetention`, `WithGroup`). Mapped to asynq options inside `AsynqClient`.
+- **AsynqClient**: Production adapter. Implements `Enqueuer` and `core.Component`. Readiness-gates task enqueueing so callers don't enqueue before the Redis connection is live.
 - **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Exposes `Mux()` for task handler registration.
 - **InMemoryClient**: Test adapter in `workerkit/memqueue`. Stores enqueued tasks in a slice. Never returns errors (unless context is cancelled). Use `Tasks()` to inspect and `Reset()` between tests.
 
@@ -91,14 +91,6 @@ func TestSend(t *testing.T) {
 }
 ```
 
-### 4. Advanced: Enqueue Raw asynq Tasks
-
-When you need asynq-specific features not covered by `EnqueueOption`:
-
-```go
-aTask := asynq.NewTask("complex:job", payload)
-info, err := client.EnqueueWithAsynq(aTask, asynq.Queue("heavy"), asynq.MaxRetry(10))
-```
 
 ### 5. Process Tasks
 

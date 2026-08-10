@@ -1,7 +1,7 @@
 // Package memqueue provides an in-memory implementation of workerkit.Enqueuer
 // for tests. Tasks are stored in a slice and can be inspected after the fact.
-// Options passed to Enqueue/EnqueueContext are ignored — the purpose of this
-// adapter is to capture what was enqueued, not to validate option routing.
+// Options passed to Enqueue/EnqueueContext are captured so tests can assert
+// against scheduling/retention settings.
 package memqueue
 
 import (
@@ -18,6 +18,7 @@ var _ workerkit.Enqueuer = (*InMemoryClient)(nil)
 // EnqueuedTask is a task as it was enqueued, with metadata captured at enqueue time.
 type EnqueuedTask struct {
 	Task       workerkit.Task
+	Options    workerkit.EnqueueOptions
 	EnqueuedAt time.Time
 }
 
@@ -51,32 +52,41 @@ func (c *InMemoryClient) Reset() {
 }
 
 // Enqueue stores the task and returns a synthetic TaskInfo.
-func (c *InMemoryClient) Enqueue(task workerkit.Task, _ ...workerkit.EnqueueOption) (*workerkit.TaskInfo, error) {
-	return c.enqueue(task), nil
+func (c *InMemoryClient) Enqueue(task workerkit.Task, opts ...workerkit.EnqueueOption) (*workerkit.TaskInfo, error) {
+	var options workerkit.EnqueueOptions
+	for _, fn := range opts {
+		fn(&options)
+	}
+	return c.enqueue(task, options), nil
 }
 
 // EnqueueContext stores the task and returns a synthetic TaskInfo.
 // If ctx is already cancelled, it returns ctx.Err() — mirroring the
 // real AsynqClient behavior.
-func (c *InMemoryClient) EnqueueContext(ctx context.Context, task workerkit.Task, _ ...workerkit.EnqueueOption) (*workerkit.TaskInfo, error) {
+func (c *InMemoryClient) EnqueueContext(ctx context.Context, task workerkit.Task, opts ...workerkit.EnqueueOption) (*workerkit.TaskInfo, error) {
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("enqueue context cancelled: %w", ctx.Err())
+		return nil, ctx.Err()
 	}
-	return c.enqueue(task), nil
+	var options workerkit.EnqueueOptions
+	for _, fn := range opts {
+		fn(&options)
+	}
+	return c.enqueue(task, options), nil
 }
 
-func (c *InMemoryClient) enqueue(task workerkit.Task) *workerkit.TaskInfo {
+func (c *InMemoryClient) enqueue(task workerkit.Task, opts workerkit.EnqueueOptions) *workerkit.TaskInfo {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.tasks = append(c.tasks, EnqueuedTask{
 		Task:       task,
+		Options:    opts,
 		EnqueuedAt: time.Now(),
 	})
 
 	return &workerkit.TaskInfo{
 		ID:    fmt.Sprintf("mem-%d", len(c.tasks)),
 		Type:  task.Type,
-		State: "enqueued",
+		State: "pending",
 	}
 }
