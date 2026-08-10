@@ -20,28 +20,65 @@ type TaskInfo struct {
 	State string
 }
 
-// EnqueueOption configures how a task is enqueued.
-type EnqueueOption func(*enqueueOptions)
-
-type enqueueOptions struct {
-	queue    string
-	maxRetry int
-	deadline time.Time
+// EnqueueOptions holds the evaluated configuration for a task.
+type EnqueueOptions struct {
+	Queue     string
+	MaxRetry  int
+	Deadline  time.Time
+	ProcessIn time.Duration
+	ProcessAt time.Time
+	Unique    time.Duration
+	Timeout   time.Duration
+	Retention time.Duration
+	Group     string
 }
+
+// EnqueueOption configures how a task is enqueued.
+type EnqueueOption func(*EnqueueOptions)
 
 // WithQueue sets the target queue name.
 func WithQueue(name string) EnqueueOption {
-	return func(o *enqueueOptions) { o.queue = name }
+	return func(o *EnqueueOptions) { o.Queue = name }
 }
 
 // WithMaxRetry sets the maximum retry count for the task.
 func WithMaxRetry(n int) EnqueueOption {
-	return func(o *enqueueOptions) { o.maxRetry = n }
+	return func(o *EnqueueOptions) { o.MaxRetry = n }
 }
 
 // WithDeadline sets an absolute deadline after which the task is discarded.
 func WithDeadline(t time.Time) EnqueueOption {
-	return func(o *enqueueOptions) { o.deadline = t }
+	return func(o *EnqueueOptions) { o.Deadline = t }
+}
+
+// WithProcessIn schedules the task to be processed after the specified duration.
+func WithProcessIn(d time.Duration) EnqueueOption {
+	return func(o *EnqueueOptions) { o.ProcessIn = d }
+}
+
+// WithProcessAt schedules the task to be processed at the specified time.
+func WithProcessAt(t time.Time) EnqueueOption {
+	return func(o *EnqueueOptions) { o.ProcessAt = t }
+}
+
+// WithUnique ensures only one task with the same Type, Payload, and Queue exists within the given TTL.
+func WithUnique(ttl time.Duration) EnqueueOption {
+	return func(o *EnqueueOptions) { o.Unique = ttl }
+}
+
+// WithTimeout sets the maximum duration for a single execution of the task.
+func WithTimeout(d time.Duration) EnqueueOption {
+	return func(o *EnqueueOptions) { o.Timeout = d }
+}
+
+// WithRetention sets how long the task is kept in the queue after successful completion.
+func WithRetention(d time.Duration) EnqueueOption {
+	return func(o *EnqueueOptions) { o.Retention = d }
+}
+
+// WithGroup groups tasks together for aggregation.
+func WithGroup(name string) EnqueueOption {
+	return func(o *EnqueueOptions) { o.Group = name }
 }
 
 // Enqueuer is the interface for enqueueing background tasks.

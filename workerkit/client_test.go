@@ -37,22 +37,31 @@ func TestAsynqClient_LifecycleAndEnqueue(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("client did not become ready")
 	}
-
-	task := asynq.NewTask("test:task", []byte("payload"))
-	info, err := client.EnqueueWithAsynq(task)
+	// Test EnqueueContext path
+	fwTaskCtx := workerkit.Task{Type: "test:ctx", Payload: nil}
+	infoCtx, err := client.EnqueueContext(ctx, fwTaskCtx, workerkit.WithProcessIn(time.Hour))
 	if err != nil {
-		t.Fatalf("EnqueueWithAsynq failed: %v", err)
-	}
-	if info.Type != "test:task" {
-		t.Errorf("unexpected task type: %s", info.Type)
-	}
-
-	infoCtx, err := client.EnqueueContextWithAsynq(ctx, asynq.NewTask("test:ctx", nil))
-	if err != nil {
-		t.Fatalf("EnqueueContextWithAsynq failed: %v", err)
+		t.Fatalf("EnqueueContext failed: %v", err)
 	}
 	if infoCtx.Type != "test:ctx" {
 		t.Errorf("unexpected task type: %s", infoCtx.Type)
+	}
+
+	// Test Enqueue with all options to cover toAsynqOpts branches
+	optsTask := workerkit.Task{Type: "test:opts", Payload: nil}
+	_, err = client.Enqueue(optsTask,
+		workerkit.WithQueue("high"),
+		workerkit.WithMaxRetry(5),
+		workerkit.WithDeadline(time.Now().Add(time.Hour)),
+		workerkit.WithProcessIn(time.Minute),
+		workerkit.WithProcessAt(time.Now().Add(time.Hour)),
+		workerkit.WithUnique(10*time.Minute),
+		workerkit.WithTimeout(5*time.Minute),
+		workerkit.WithRetention(24*time.Hour),
+		workerkit.WithGroup("test-group"),
+	)
+	if err != nil {
+		t.Fatalf("Enqueue with options failed: %v", err)
 	}
 
 	// Also test the Enqueuer interface path.
