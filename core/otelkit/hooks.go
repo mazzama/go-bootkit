@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/mazzama/go-bootkit/core"
-	"github.com/mazzama/go-bootkit/core/healthkit"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -77,19 +76,9 @@ func (h *OTelHooks) OnComponentStop(name string, duration time.Duration, err err
 	h.stopDuration.Record(context.Background(), duration.Milliseconds(), metric.WithAttributes(attrs...))
 }
 
-func (h *OTelHooks) OnHealthEvaluated(kind healthkit.Kind, duration time.Duration, err error) {
-	kindStr := "unknown"
-	switch kind {
-	case healthkit.Liveness:
-		kindStr = "liveness"
-	case healthkit.Readiness:
-		kindStr = "readiness"
-	case healthkit.Startup:
-		kindStr = "startup"
-	}
-
+func (h *OTelHooks) OnHealthEvaluated(kind string, duration time.Duration, err error) {
 	attrs := []attribute.KeyValue{
-		attribute.String("kind", kindStr),
+		attribute.String("kind", kind),
 		attribute.Bool("error", err != nil),
 	}
 

@@ -120,7 +120,7 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 
 func (r *ApplicationRunner) healthWiring() {
 	r.healthAggregator.SetHook(func(kind healthkit.Kind, duration time.Duration, err error) {
-		r.hooks.OnHealthEvaluated(kind, duration, err)
+		r.hooks.OnHealthEvaluated(kind.String(), duration, err)
 	})
 
 	r.mu.Lock()

@@ -494,3 +494,20 @@ func TestHealthHookIsCalled(t *testing.T) {
 		t.Errorf("expected positive duration, got %v", calledDur)
 	}
 }
+
+func TestKindString(t *testing.T) {
+	tests := []struct {
+		kind Kind
+		want string
+	}{
+		{kind: Liveness, want: "liveness"},
+		{kind: Readiness, want: "readiness"},
+		{kind: Startup, want: "startup"},
+		{kind: Kind(99), want: "unknown"},
+	}
+	for _, tt := range tests {
+		if got := tt.kind.String(); got != tt.want {
+			t.Errorf("Kind(%d).String() = %q, want %q", tt.kind, got, tt.want)
+		}
+	}
+}

@@ -20,6 +20,21 @@ const (
 	Startup
 )
 
+// String returns the stable string label for the health check kind.
+// Unrecognized values map to "unknown".
+func (k Kind) String() string {
+	switch k {
+	case Liveness:
+		return "liveness"
+	case Readiness:
+		return "readiness"
+	case Startup:
+		return "startup"
+	default:
+		return "unknown"
+	}
+}
+
 type Check struct {
 	Fn      func(ctx context.Context) error
 	Name    string
