@@ -15,7 +15,7 @@ Deepen the architectural seams across the core and kit packages. Abstract `TxMan
 ## User Stories
 
 1. As a developer writing tests, I want repositories to depend on a `QuerierResolver` interface, so that I can unit test domain logic using a mock or in-memory querier without requiring a live Postgres database via testcontainers.
-2. As a framework consumer, I want `serverkit.NewDefaultHandler` to return an `http.Handler` with chi as the internal implementation, so that my wiring code only imports chi for the type assertion at the route-mounting point.
+2. As a framework consumer, I want `serverkit.NewDefaultRouter` to return a `chi.Router` directly, so that my wiring code can mount routes without a type assertion (see serverkit ADR-0002).
 3. As a framework consumer, I want to configure the router timeout via a functional option, so that I can tune request timeouts for my specific service load rather than relying on a hardcoded 60s timeout.
 4. As a framework consumer, I want `cachekit.Cache.Get` and `Set` to handle encoding, so that I don't have to write repetitive `json.Marshal`/`Unmarshal` boilerplate in every service method that touches the cache.
 5. As an operator reviewing logs, I want trace IDs and base resource attributes (`service.name`, `service.version`, `deployment.environment`) automatically injected at the root of every log record, so that I can correlate logs efficiently across services and environments.
@@ -26,7 +26,7 @@ Deepen the architectural seams across the core and kit packages. Abstract `TxMan
 
 - **Modules Modified**: `core`, `databasekit`, `serverkit`, `cachekit`, and example services (`examples/orders`).
 - **Database Seam**: Introduced `QuerierResolver` interface in `databasekit`. Modified repositories in `examples/orders` to depend on `QuerierResolver` instead of the concrete `*TxManager`. The `*pgxpool.Pool` natively implements `TxProvider`, so bespoke lazy adapters were removed from tests.
-- **Router Seam**: `serverkit.NewDefaultHandler` returns `http.Handler` (chi is the internal implementation). `WithRouterTimeout` exposed as a functional option. Callers type-assert to `*chi.Mux` at wiring time.
+- **Router Seam**: `serverkit.NewDefaultRouter` returns `chi.Router` directly (supersedes ADR-0001; see serverkit ADR-0002). `WithRouterTimeout` exposed as a functional option. No type assertion needed.
 - **Cache Seam**: Deepened `cachekit.Cache` interface to `Get(ctx, key, dest any)` and `Set(ctx, key, value any)`. Modified `RedisCache` and `MemoryCache` implementations to own the JSON codec, eliminating boilerplate in `OrderService`.
 - **Logger Seam**: Extended `core.LoggerConfig` to accept `ServiceName`, `Version`, and `Environment`. Updated `NewLogger` to construct these attributes and inject them into the `TraceHandler` directly.
 - **Runner Seam**: Extracted `healthWiring`, `startSupervisor`, and `shutdownOrchestrator` methods in `core.ApplicationRunner`.

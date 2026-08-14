@@ -139,7 +139,7 @@ func WithMiddleware(middlewares ...func(http.Handler) http.Handler) RouterOption
 
 // MountHealthRoutes registers the standard health probe endpoints on the given
 // router. Consumers who build their own chi router can call this directly
-// instead of using NewDefaultHandler.
+// instead of using NewDefaultRouter.
 func MountHealthRoutes(mux chi.Router, health *healthkit.Aggregator) {
 	if health == nil {
 		return
@@ -150,7 +150,7 @@ func MountHealthRoutes(mux chi.Router, health *healthkit.Aggregator) {
 	mux.Get("/health", health.Handler(healthkit.Liveness))
 }
 
-func NewDefaultHandler(health *healthkit.Aggregator, logger *slog.Logger, opts ...RouterOption) http.Handler {
+func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ...RouterOption) chi.Router {
 	options := RouterOptions{Timeout: 60 * time.Second}
 	for _, opt := range opts {
 		opt(&options)

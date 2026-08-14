@@ -59,16 +59,15 @@ func main() {
 
 	// 3. Setup HTTP Server and Routes
 	healthAggregator := healthkit.NewAggregator(5 * time.Second)
-	handler := serverkit.NewDefaultHandler(healthAggregator, logger)
+	router := serverkit.NewDefaultRouter(healthAggregator, logger)
 	
-	// Add custom routes (type assertion since the default handler returns http.Handler)
-	mux := handler.(*chi.Mux)
-	mux.Get("/api/status", func(w http.ResponseWriter, r *http.Request) {
+	// Add custom routes directly — NewDefaultRouter returns chi.Router
+	router.Get("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
-	server := serverkit.NewHTTPServer("api", ":8080", handler, serverkit.WithLogger(logger))
+	server := serverkit.NewHTTPServer("api", ":8080", router, serverkit.WithLogger(logger))
 
 	// 4. Run Application
 	runner := core.NewApplicationRunner(
