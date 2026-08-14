@@ -90,7 +90,7 @@ func run() error {
 
 	// Register handlers
 	processor := NewNotificationProcessor(logger)
-	asyncServer.Mux().HandleFunc("notification:send", processor.Process)
+	asyncServer.HandleFunc("notification:send", processor.Process)
 
 	runner := core.NewApplicationRunner(
 		core.WithLogger(logger),

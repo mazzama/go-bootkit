@@ -12,6 +12,11 @@ type Task struct {
 	Payload []byte
 }
 
+// Handler is a framework-native task processor, decoupled from the underlying
+// job-queue implementation. Adapters wrap Handler values to convert between
+// Task and backend-specific task types.
+type Handler func(ctx context.Context, task Task) error
+
 // TaskInfo carries metadata about an enqueued task.
 type TaskInfo struct {
 	ID            string

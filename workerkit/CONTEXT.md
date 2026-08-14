@@ -6,10 +6,11 @@ The `workerkit` module integrates `hibiken/asynq` (a Redis-backed background job
 
 - **Enqueuer**: Interface for enqueueing background tasks (`Enqueue`, `EnqueueContext`). Accepts framework `Task` values — callers never import `asynq`. `AsynqClient` implements it for production; `InMemoryClient` in `workerkit/memqueue` implements it for tests.
 - **Task**: Framework-native unit of work (`Type string`, `Payload []byte`). Decoupled from `asynq.Task`. Adapters map to backend-specific types internally.
+- **Handler**: Framework-native task processor (`func(ctx context.Context, task Task) error`). Domain handlers accept `workerkit.Task` and never import `asynq`. Registered via `AsynqServer.HandleFunc`.
 - **TaskInfo**: Metadata about an enqueued task (`ID`, `Type`, `Queue`, `State`).
 - **EnqueueOption**: Functional options for task enqueueing (`WithQueue`, `WithMaxRetry`, `WithDeadline`, `WithProcessIn`, `WithProcessAt`, `WithUnique`, `WithTimeout`, `WithRetention`, `WithGroup`). Mapped to asynq options inside `AsynqClient`.
 - **AsynqClient**: Production adapter. Implements `Enqueuer` and `core.Component`. Readiness-gates task enqueueing so callers don't enqueue before the Redis connection is live.
-- **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Exposes `Mux()` for task handler registration.
+- **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Exposes `HandleFunc(pattern, handler)` for framework-native handler registration and `Mux()` as an escape hatch for advanced asynq features (middleware, group aggregation).
 - **InMemoryClient**: Test adapter in `workerkit/memqueue`. Stores enqueued tasks in a slice. Never returns errors (unless context is cancelled). Use `Tasks()` to inspect and `Reset()` between tests.
 
 ## Architecture
@@ -47,8 +48,8 @@ server := workerkit.NewAsynqServer(
 	asynq.Config{Concurrency: 20},
 )
 
-// Register task handlers.
-server.Mux().HandleFunc("email:deliver", HandleEmailDelivery)
+// Register task handlers with framework-native handlers.
+server.HandleFunc("email:deliver", HandleEmailDelivery)
 
 runner := core.NewApplicationRunner(
 	core.WithServices(client, server),
@@ -94,14 +95,16 @@ func TestSend(t *testing.T) {
 
 ### 5. Process Tasks
 
-Handler functions match asynq's signature:
+Handlers accept the framework-native `workerkit.Task` — no asynq import needed:
 
 ```go
-func HandleEmailDelivery(ctx context.Context, t *asynq.Task) error {
+func HandleEmailDelivery(ctx context.Context, t workerkit.Task) error {
 	// Deserialize payload and do work.
 	return nil // returning an error triggers retries.
 }
 ```
+
+For advanced asynq features (middleware, group aggregation), `AsynqServer.Mux()` remains available as an escape hatch — it returns the raw `*asynq.ServeMux`.
 
 ## Configuration
 

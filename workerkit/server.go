@@ -63,6 +63,15 @@ func (s *AsynqServer) Mux() *asynq.ServeMux {
 	return s.mux
 }
 
+// HandleFunc registers a framework-native Handler on the internal mux.
+// The handler receives a workerkit.Task constructed from the asynq task's
+// type and payload, so domain handlers never import asynq.
+func (s *AsynqServer) HandleFunc(pattern string, handler Handler) {
+	s.mux.HandleFunc(pattern, func(ctx context.Context, t *asynq.Task) error {
+		return handler(ctx, Task{Type: t.Type(), Payload: t.Payload()})
+	})
+}
+
 func (s *AsynqServer) Name() string {
 	return s.name
 }
