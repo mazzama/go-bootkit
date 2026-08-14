@@ -31,7 +31,8 @@ func (s *syncBuffer) Bytes() []byte {
 
 func TestTraceHandler_WithSpanContext(t *testing.T) {
 	var buf syncBuffer
-	logger := core.NewLogger(core.WithLogWriter(&buf), core.WithLogLevel(slog.LevelDebug))
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := slog.New(core.NewTraceHandler(handler))
 
 	traceID, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
 	spanID, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
@@ -61,7 +62,8 @@ func TestTraceHandler_WithSpanContext(t *testing.T) {
 
 func TestTraceHandler_WithoutSpanContext(t *testing.T) {
 	var buf syncBuffer
-	logger := core.NewLogger(core.WithLogWriter(&buf), core.WithLogLevel(slog.LevelDebug))
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := slog.New(core.NewTraceHandler(handler))
 
 	logger.InfoContext(context.Background(), "test message")
 
@@ -80,7 +82,8 @@ func TestTraceHandler_WithoutSpanContext(t *testing.T) {
 
 func TestTraceHandler_WithAttrsAndGroup(t *testing.T) {
 	var buf syncBuffer
-	logger := core.NewLogger(core.WithLogWriter(&buf), core.WithLogLevel(slog.LevelDebug))
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := slog.New(core.NewTraceHandler(handler))
 
 	l := logger.With("component", "test").WithGroup("group1")
 
@@ -122,7 +125,8 @@ func TestTraceHandler_WithAttrsAndGroup(t *testing.T) {
 
 func TestTraceHandler_ConcurrentSafety(t *testing.T) {
 	var buf syncBuffer
-	logger := core.NewLogger(core.WithLogWriter(&buf))
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
+	logger := slog.New(core.NewTraceHandler(handler))
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {

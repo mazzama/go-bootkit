@@ -39,9 +39,8 @@ import (
 
 func main() {
 	// 1. Setup structured trace-correlated logger
-	logger := core.NewLogger(core.LoggerConfig{
-		Level: slog.LevelInfo,
-	})
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	logger := slog.New(core.NewTraceHandler(handler))
 	slog.SetDefault(logger)
 
 	// 2. Initialize Infrastructure Components
