@@ -366,7 +366,7 @@ type recordingHooks struct {
 	mu           sync.Mutex
 	starts       []string
 	stops        []string
-	healthChecks []healthkit.Kind
+	healthChecks []string
 }
 
 func (r *recordingHooks) OnComponentStart(name string, duration time.Duration, err error) {
@@ -379,7 +379,7 @@ func (r *recordingHooks) OnComponentStop(name string, duration time.Duration, er
 	defer r.mu.Unlock()
 	r.stops = append(r.stops, name)
 }
-func (r *recordingHooks) OnHealthEvaluated(kind healthkit.Kind, duration time.Duration, err error) {
+func (r *recordingHooks) OnHealthEvaluated(kind string, duration time.Duration, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.healthChecks = append(r.healthChecks, kind)
@@ -427,7 +427,7 @@ func TestRunHooksAreCalled(t *testing.T) {
 	if len(hooks.stops) != 1 || hooks.stops[0] != "hooked-svc" {
 		t.Errorf("expected 1 stop hook for hooked-svc, got %v", hooks.stops)
 	}
-	if len(hooks.healthChecks) != 1 || hooks.healthChecks[0] != healthkit.Liveness {
-		t.Errorf("expected 1 health hook for Liveness, got %v", hooks.healthChecks)
+	if len(hooks.healthChecks) != 1 || hooks.healthChecks[0] != "liveness" {
+		t.Errorf("expected 1 health hook for liveness, got %v", hooks.healthChecks)
 	}
 }

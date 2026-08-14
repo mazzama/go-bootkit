@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -57,7 +56,7 @@ func TestOTelHooks_OnHealthEvaluated(t *testing.T) {
 	hooks, err := NewHooks(meter)
 	require.NoError(t, err)
 
-	hooks.OnHealthEvaluated(healthkit.Readiness, 42*time.Millisecond, errors.New("boom"))
+	hooks.OnHealthEvaluated("readiness", 42*time.Millisecond, errors.New("boom"))
 
 	var rm metricdata.ResourceMetrics
 	err = reader.Collect(context.Background(), &rm)
