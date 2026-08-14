@@ -27,3 +27,26 @@ A builder function in `healthkit` returning standard `Liveness` (nop) and `Readi
 
 **retry**:
 A `core/retry` sub-package providing `retry.Do(ctx, maxAttempts, baseBackoff, fn)` — exponential-backoff retry with jitter shared by infrastructure adapters that tolerate transient backend unavailability during startup.
+
+**TraceHandler**:
+An `slog.Handler` middleware that wraps any base handler to automatically inject OpenTelemetry `trace_id` and `span_id` from `context.Context` into log records.
+
+## Patterns
+
+### Trace-Correlated Logger Setup
+
+Configure a standard `slog.Logger` with OpenTelemetry trace correlation by composing `slog.NewJSONHandler` (or any `slog.Handler`) with `core.NewTraceHandler`:
+
+```go
+handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+traced := core.NewTraceHandler(handler)
+logger := slog.New(traced.WithAttrs([]slog.Attr{
+    slog.String("service.name", serviceName),
+}))
+```
+
+`TraceHandler` injects `trace_id`/`span_id` at the root of every record before
+applying any attrs or groups. Attributes configured at setup time (as above)
+land at the root; attributes added later via `logger.With(...)` are applied in
+the order `WithGroup`/`WithAttrs` are called, so nested groups keep their
+structure.

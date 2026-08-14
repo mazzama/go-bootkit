@@ -32,13 +32,13 @@ func run() error {
 		return err
 	}
 
-	// 2. Trace-correlated logger. NewLogger wraps a JSON handler with the
-	//    TraceHandler, so any log emitted with a span in its context carries
-	//    trace_id/span_id.
-	logger := core.NewLogger(
-		core.WithLogLevel(slog.LevelInfo),
-		core.WithServiceName(serviceName),
-	)
+	// 2. Trace-correlated logger. Composing standard slog.NewJSONHandler with
+	//    core.NewTraceHandler so logs with a span in context carry trace_id/span_id.
+	logHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	traced := core.NewTraceHandler(logHandler)
+	logger := slog.New(traced.WithAttrs([]slog.Attr{
+		slog.String("service.name", serviceName),
+	}))
 	slog.SetDefault(logger)
 
 	// 3. OpenTelemetry tracing to stdout, so the trace IDs above are real.

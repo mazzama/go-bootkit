@@ -1,3 +1,9 @@
+> **Status: historical decision record.** The logger seam described below
+> (user story 6 and "Logger Seam" below) was subsequently reversed by
+> [issue #54](https://github.com/mazzama/go-bootkit/issues/54) / PR #56:
+> `core.NewLogger` was deleted in favor of the documented stdlib `slog` +
+> `core.NewTraceHandler` composition pattern. See `core/CONTEXT.md`.
+
 ## Problem Statement
 
 The go-bootkit architecture contains several shallow modules and concrete couplings that hinder testability and leak implementation details. Repositories depend on a concrete `TxManager` (making unit tests difficult without Docker), the router is exposed as an interface that lies (`http.Handler` when callers expect `*chi.Mux`), the cache interface is too shallow and leaks codec logic into callers, the logger is a pass-through that forces callers to wire resource attributes manually, and the application runner lacks isolated shutdown logic for testing.

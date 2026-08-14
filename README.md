@@ -14,7 +14,7 @@ A production-ready Go application framework that integrates multiple components 
 - **Auto-Wired Health Checks**: Any component that exposes health checks is automatically wired to the health endpoints (`/live`, `/ready`, `/startup`).
 - **Enqueuer Seam**: `workerkit.Enqueuer` interface decouples services from `asynq` — inject an in-memory adapter for tests, the real client for production (same pattern as `Cache`/`MemoryCache`).
 
-- **Core**: Base interfaces (`Component`, `HealthCheckProvider`), `ApplicationRunner` for lifecycle orchestration, `Lifecycle` primitive for embeddable start/stop semantics, `healthkit` for probes (`StandardChecks`), `retry` for exponential-backoff connection retry, and `logger` for structured JSON with trace correlation.
+- **Core**: Base interfaces (`Component`, `HealthCheckProvider`), `ApplicationRunner` for lifecycle orchestration, `Lifecycle` primitive for embeddable start/stop semantics, `healthkit` for probes (`StandardChecks`), `retry` for exponential-backoff connection retry, and `TraceHandler` for trace-correlated structured logging via stdlib `slog`.
 - **CacheKit**: Redis cache integration using `redis/go-redis/v9`. Exposes a `Cache` interface with an in-memory test adapter (`memcache`).
 - **DatabaseKit**: PostgreSQL integration using `jackc/pgx/v5` and `TxManager` for context-propagated transactions. Repositories use `QuerierResolver` to work inside and outside transactions.
 - **ServerKit**: HTTP server wrapped around `go-chi/chi/v5` with panic recovery, CORS, and graceful shutdown.
@@ -39,9 +39,8 @@ import (
 
 func main() {
 	// 1. Setup structured trace-correlated logger
-	logger := core.NewLogger(core.LoggerConfig{
-		Level: slog.LevelInfo,
-	})
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	logger := slog.New(core.NewTraceHandler(handler))
 	slog.SetDefault(logger)
 
 	// 2. Initialize Infrastructure Components
