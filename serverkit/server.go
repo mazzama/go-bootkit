@@ -136,6 +136,7 @@ func WithMiddleware(middlewares ...func(http.Handler) http.Handler) RouterOption
 		o.Middlewares = append(o.Middlewares, middlewares...)
 	}
 }
+
 // MountHealthRoutes registers the standard health probe endpoints on the given
 // router. Consumers who build their own chi router can call this directly
 // instead of using NewDefaultHandler.

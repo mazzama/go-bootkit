@@ -243,7 +243,6 @@ func TestMountHealthRoutes_NilAggregator(t *testing.T) {
 	}
 }
 
-
 func TestNewHTTPServerValidation(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 
