@@ -189,11 +189,11 @@ func TestStartAndStop(t *testing.T) {
 	}
 }
 
-func TestNewDefaultHandler(t *testing.T) {
+func TestNewDefaultRouter(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	agg := healthkit.NewAggregator(0)
-	handler := NewDefaultHandler(agg, logger)
+	handler := NewDefaultRouter(agg, logger)
 
 	if handler == nil {
 		t.Fatal("expected handler to be non-nil")
@@ -282,7 +282,7 @@ func TestNewHTTPServerValidation(t *testing.T) {
 	}
 }
 
-func TestNewDefaultHandlerWithMiddleware(t *testing.T) {
+func TestNewDefaultRouterWithMiddleware(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	agg := healthkit.NewAggregator(0)
@@ -294,7 +294,7 @@ func TestNewDefaultHandlerWithMiddleware(t *testing.T) {
 		})
 	}
 
-	handler := NewDefaultHandler(agg, logger, WithMiddleware(recordingMiddleware))
+	handler := NewDefaultRouter(agg, logger, WithMiddleware(recordingMiddleware))
 
 	req := httptest.NewRequest(http.MethodGet, "/health/liveness", nil)
 	rec := httptest.NewRecorder()

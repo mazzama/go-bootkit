@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/databasekit"
@@ -96,14 +95,13 @@ func run() error {
 		core.WithServices(db, cache, asyncClient, asyncServer),
 	)
 
-	// 6. HTTP server. NewDefaultHandler returns an http.Handler pre-configured
-	//    with chi routing, health probes, request logging, and panic recovery.
-	//    Type-assert to mount application routes, then wrap in OpenTelemetry.
-	httpHandler := serverkit.NewDefaultHandler(runner.HealthAggregator(), logger)
-	router := httpHandler.(*chi.Mux)
+	// 6. HTTP server. NewDefaultRouter returns a chi.Router pre-configured
+	//    with middleware, health probes, request logging, and panic recovery.
+	//    Mount application routes, then wrap in OpenTelemetry.
+	router := serverkit.NewDefaultRouter(runner.HealthAggregator(), logger)
 	handler.Routes(router)
 
-	otelHandler := otelhttp.NewHandler(httpHandler, "http.server")
+	otelHandler := otelhttp.NewHandler(router, "http.server")
 	server, err := serverkit.NewHTTPServer(serviceName, cfg.HTTPAddr, otelHandler, serverkit.WithLogger(logger))
 	if err != nil {
 		return err
