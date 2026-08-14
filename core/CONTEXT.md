@@ -44,3 +44,9 @@ logger := slog.New(traced.WithAttrs([]slog.Attr{
     slog.String("service.name", serviceName),
 }))
 ```
+
+`TraceHandler` injects `trace_id`/`span_id` at the root of every record before
+applying any attrs or groups. Attributes configured at setup time (as above)
+land at the root; attributes added later via `logger.With(...)` are applied in
+the order `WithGroup`/`WithAttrs` are called, so nested groups keep their
+structure.

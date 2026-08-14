@@ -4,7 +4,8 @@ A small orders/inventory service built on **go-bootkit**. It exists to show the
 framework's moving parts working together in a realistic flow:
 
 - **`core`** — `ApplicationRunner` orchestrates startup, graceful shutdown, and
-  auto-wires health checks; `NewLogger` gives trace-correlated JSON logging.
+  auto-wires health checks; `TraceHandler` composes with stdlib `slog` for
+  trace-correlated JSON logging.
 - **`databasekit`** — `TxManager` runs the order-placement flow in a single
   transaction, propagated through `context.Context` (no explicit `*pgx.Tx`
   threading).
@@ -97,10 +98,10 @@ The service fails fast at startup if `DB_CONN_STR` is unset.
 ## Observability
 
 `main.go` configures an OpenTelemetry tracer that exports spans to **stdout**
-(no collector needed). Combined with `core.NewLogger`'s `TraceHandler`, every
-request produces a span and the log lines emitted while handling it carry the
-same `trace_id` / `span_id`. Watch the process output while hitting an endpoint
-to see the correlation.
+(no collector needed). Combined with `core.NewTraceHandler` wrapping the
+`slog` handler, every request produces a span and the log lines emitted while
+handling it carry the same `trace_id` / `span_id`. Watch the process output
+while hitting an endpoint to see the correlation.
 
 ## Tests
 
