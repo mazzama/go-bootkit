@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
@@ -210,6 +211,35 @@ func TestNewDefaultHandler(t *testing.T) {
 	// Verify the injected logger was used by httplog middleware
 	if !strings.Contains(buf.String(), "/health/liveness") {
 		t.Errorf("expected injected logger to capture the request, got: %s", buf.String())
+	}
+}
+
+func TestMountHealthRoutes(t *testing.T) {
+	agg := healthkit.NewAggregator(0)
+	router := chi.NewRouter()
+	MountHealthRoutes(router, agg)
+
+	// Verify all health endpoints are mounted
+	endpoints := []string{"/health/liveness", "/health/readiness", "/health/startup", "/health"}
+	for _, ep := range endpoints {
+		req := httptest.NewRequest(http.MethodGet, ep, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: expected 200 OK, got %d", ep, rec.Code)
+		}
+	}
+}
+
+func TestMountHealthRoutes_NilAggregator(t *testing.T) {
+	router := chi.NewRouter()
+	MountHealthRoutes(router, nil) // should not panic
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 with nil aggregator, got %d", rec.Code)
 	}
 }
 

@@ -2,8 +2,29 @@ package workerkit
 
 import (
 	"context"
+	"crypto/tls"
 	"time"
 )
+
+// RedisConfig holds connection parameters for a Redis backend.
+// Mapped to asynq.RedisClientOpt internally.
+type RedisConfig struct {
+	Addr      string
+	Password  string
+	DB        int
+	Username  string
+	TLSConfig *tls.Config
+}
+
+// ServerConfig holds configuration for the task processing server.
+// Mapped to asynq.Config internally.
+type ServerConfig struct {
+	Concurrency     int
+	Queues          map[string]int
+	StrictPriority  bool
+	ShutdownTimeout time.Duration
+	RetryDelayFunc  func(n int, err error, task Task) time.Duration
+}
 
 // Task is a framework-native unit of work, decoupled from the underlying
 // job-queue implementation. Adapters map Task to backend-specific types.

@@ -8,7 +8,7 @@ It is part of the core infrastructure layer of the application.
 - **CacheKit**: The module name for caching infrastructure.
 - **Cache**: Interface for generic cache operations (`Get`, `Set`, `Delete`, `Exists`). Decouples consumers from Redis. A `Get` on a missing key returns an error satisfying `errors.Is(err, ErrCacheMiss)`.
 - **ErrCacheMiss**: Sentinel error returned (or wrapped) by every `Cache` adapter on a cache miss. Consumers distinguish a miss from a real failure with `errors.Is(err, cachekit.ErrCacheMiss)` — no adapter-specific string matching.
-- **RedisCache**: The specific implementation of `Cache` using Redis.
+- **RedisCache**: The specific implementation of `Cache` using Redis. Does not expose the raw `redis.Client` — all access flows through the `Cache` interface.
 - **MemoryCache**: In-memory test adapter in `cachekit/memcache`. Implements `Cache` without external dependencies.
 
 ## Architecture

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 
@@ -15,9 +14,9 @@ func TestHealthChecks(t *testing.T) {
 	}
 	defer mr.Close()
 
-	redisOpt := asynq.RedisClientOpt{Addr: mr.Addr()}
-	server := workerkit.NewAsynqServer("test-health", redisOpt, asynq.Config{Concurrency: 1})
-	client := workerkit.NewAsynqClient("test-client-health", redisOpt)
+	redisCfg := workerkit.RedisConfig{Addr: mr.Addr()}
+	server := workerkit.NewAsynqServer("test-health", redisCfg, workerkit.ServerConfig{Concurrency: 1})
+	client := workerkit.NewAsynqClient("test-client-health", redisCfg)
 
 	checks := server.HealthChecks()
 	if len(checks) != 2 { // liveness and readiness

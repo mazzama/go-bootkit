@@ -161,10 +161,6 @@ func (r *RedisCache) Name() string {
 	return r.name
 }
 
-func (r *RedisCache) Client() *redis.Client {
-	return r.client
-}
-
 func (r *RedisCache) codecOrDefault() Codec {
 	if r.codec != nil {
 		return r.codec
@@ -177,11 +173,11 @@ func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, exp
 	if err != nil {
 		return err
 	}
-	return r.Client().Set(ctx, key, b, expiration).Err()
+	return r.client.Set(ctx, key, b, expiration).Err()
 }
 
 func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
-	str, err := r.Client().Get(ctx, key).Result()
+	str, err := r.client.Get(ctx, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return fmt.Errorf("%s: %w", key, ErrCacheMiss)
@@ -192,17 +188,17 @@ func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
 }
 
 func (r *RedisCache) Delete(ctx context.Context, key string) error {
-	return r.Client().Del(ctx, key).Err()
+	return r.client.Del(ctx, key).Err()
 }
 
 func (r *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
-	result, err := r.Client().Exists(ctx, key).Result()
+	result, err := r.client.Exists(ctx, key).Result()
 	return result > 0, err
 }
 
 func (r *RedisCache) HealthChecks() []healthkit.Check {
 	return healthkit.StandardChecks(r.name, func(ctx context.Context) error {
-		client := r.Client()
+		client := r.client
 		if client == nil {
 			return fmt.Errorf("redis client is not initialized")
 		}

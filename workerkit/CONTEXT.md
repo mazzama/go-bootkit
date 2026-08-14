@@ -9,8 +9,10 @@ The `workerkit` module integrates `hibiken/asynq` (a Redis-backed background job
 - **Handler**: Framework-native task processor (`func(ctx context.Context, task Task) error`). Domain handlers accept `workerkit.Task` and never import `asynq` (only wiring code — `main.go` — touches asynq types like `RedisConnOpt`/`Config`). Registered via `AsynqServer.HandleFunc`. Handlers receive only the task `Type` and `Payload`; asynq-specific features like result writing or headers require dropping to `Mux()`.
 - **TaskInfo**: Metadata about an enqueued task (`ID`, `Type`, `Queue`, `State`).
 - **EnqueueOption**: Functional options for task enqueueing (`WithQueue`, `WithMaxRetry`, `WithDeadline`, `WithProcessIn`, `WithProcessAt`, `WithUnique`, `WithTimeout`, `WithRetention`, `WithGroup`). Mapped to asynq options inside `AsynqClient`.
-- **AsynqClient**: Production adapter. Implements `Enqueuer` and `core.Component`. Readiness-gates task enqueueing so callers don't enqueue before the Redis connection is live.
-- **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Exposes `HandleFunc(pattern, handler)` for framework-native handler registration and `Mux()` as an escape hatch for asynq middleware. Group aggregation is configured via the `asynq.Config` passed to `NewAsynqServer`, not via `Mux()`.
+- **RedisConfig**: Framework-native Redis connection config (`Addr`, `Password`, `DB`, `Username`, `TLSConfig`). Mapped to `asynq.RedisClientOpt` internally — consumers never import asynq.
+- **ServerConfig**: Framework-native server config (`Concurrency`, `Queues`, `StrictPriority`, `ShutdownTimeout`, `RetryDelayFunc`). Mapped to `asynq.Config` internally.
+- **AsynqClient**: Production adapter. Implements `Enqueuer` and `core.Component`. Constructor accepts `RedisConfig` — asynq stays behind the seam. Readiness-gates task enqueueing so callers don't enqueue before the Redis connection is live.
+- **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Constructor accepts `RedisConfig` and `ServerConfig` — asynq stays behind the seam. Exposes `HandleFunc(pattern, handler)` for framework-native handler registration and `Mux()` as an escape hatch for asynq middleware. Group aggregation is configured via `ServerConfig`, not via `Mux()`.
 - **InMemoryClient**: Test adapter in `workerkit/memqueue`. Stores enqueued tasks in a slice. Never returns errors (unless context is cancelled). Use `Tasks()` to inspect and `Reset()` between tests.
 
 ## Architecture
@@ -32,11 +34,10 @@ This mirrors the `cachekit.Cache` / `memcache.MemoryCache` pattern — same seam
 
 ```go
 import (
-	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 
-redisOpt := asynq.RedisClientOpt{Addr: "localhost:6379"}
+redisOpt := workerkit.RedisConfig{Addr: "localhost:6379"}
 
 // Client for enqueueing tasks — implements Enqueuer.
 client := workerkit.NewAsynqClient("asynq-client", redisOpt)
@@ -45,7 +46,7 @@ client := workerkit.NewAsynqClient("asynq-client", redisOpt)
 server := workerkit.NewAsynqServer(
 	"asynq-server",
 	redisOpt,
-	asynq.Config{Concurrency: 20},
+	workerkit.ServerConfig{Concurrency: 20},
 )
 
 // Register task handlers with framework-native handlers.
@@ -111,4 +112,4 @@ middleware), register it directly on `AsynqServer.Mux()` — it returns the raw
 
 ## Configuration
 
-`NewAsynqServer` accepts `asynq.Config` directly for dead-letter queues, strict priority queues, group aggregation, and custom retry delays.
+`NewAsynqServer` accepts `ServerConfig` directly for concurrency, queue weights, strict priority, shutdown timeout, and custom retry delays. For advanced asynq features not covered by `ServerConfig`, use `Mux()` or construct the asynq types directly.

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 
@@ -17,8 +16,8 @@ func TestAsynqServer_Lifecycle(t *testing.T) {
 	}
 	defer mr.Close()
 
-	redisOpt := asynq.RedisClientOpt{Addr: mr.Addr()}
-	server := workerkit.NewAsynqServer("test-server", redisOpt, asynq.Config{Concurrency: 1})
+	redisOpt := workerkit.RedisConfig{Addr: mr.Addr()}
+	server := workerkit.NewAsynqServer("test-server", redisOpt, workerkit.ServerConfig{Concurrency: 1})
 
 	if server.Name() != "test-server" {
 		t.Errorf("expected test-server, got %s", server.Name())
@@ -56,8 +55,8 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 	}
 	defer mr.Close()
 
-	redisOpt := asynq.RedisClientOpt{Addr: mr.Addr()}
-	server := workerkit.NewAsynqServer("test-server", redisOpt, asynq.Config{Concurrency: 1})
+	redisOpt := workerkit.RedisConfig{Addr: mr.Addr()}
+	server := workerkit.NewAsynqServer("test-server", redisOpt, workerkit.ServerConfig{Concurrency: 1})
 
 	got := make(chan workerkit.Task, 1)
 	server.HandleFunc("notification:send", func(ctx context.Context, task workerkit.Task) error {

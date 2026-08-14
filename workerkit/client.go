@@ -15,8 +15,8 @@ type AsynqClient struct {
 	client *asynq.Client
 }
 
-func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
-	client := asynq.NewClient(redisOpt)
+func NewAsynqClient(name string, redisCfg RedisConfig) *AsynqClient {
+	client := asynq.NewClient(redisCfg.toAsynqOpt())
 
 	c := &AsynqClient{
 		name:   name,
@@ -30,6 +30,16 @@ func NewAsynqClient(name string, redisOpt asynq.RedisConnOpt) *AsynqClient {
 	})
 
 	return c
+}
+
+func (rc RedisConfig) toAsynqOpt() asynq.RedisClientOpt {
+	return asynq.RedisClientOpt{
+		Addr:      rc.Addr,
+		Password:  rc.Password,
+		DB:        rc.DB,
+		Username:  rc.Username,
+		TLSConfig: rc.TLSConfig,
+	}
 }
 
 // Enqueue schedules a framework Task for asynchronous execution.
