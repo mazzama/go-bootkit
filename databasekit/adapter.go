@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -37,35 +38,61 @@ func (r pgxRowsAdapter) Scan(dest ...any) error { return r.rows.Scan(dest...) }
 func (r pgxRowsAdapter) Err() error             { return r.rows.Err() }
 func (r pgxRowsAdapter) Close()                 { r.rows.Close() }
 
-// pgxTxAdapter adapts a pgx.Tx to the framework Tx. Nested Begin re-wraps the
-// inner pgx.Tx so savepoints stay invisible to callers.
-type pgxTxAdapter struct {
-	tx pgx.Tx
+// pgxProvider is the query surface shared by pgx.Tx and *pgxpool.Pool: the pgx
+// query methods plus opening a transaction. Both framework adapters translate
+// it to the pgx-free seam, so the translation lives in one place.
+type pgxProvider interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-func (t pgxTxAdapter) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
-	tag, err := t.tx.Exec(ctx, sql, args...)
+// pgxProviderAdapter translates a pgxProvider to the framework Querier and
+// Begin. pgxTxAdapter and poolAdapter embed it.
+type pgxProviderAdapter struct {
+	src pgxProvider
+}
+
+func (a pgxProviderAdapter) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	tag, err := a.src.Exec(ctx, sql, args...)
 	return tag.RowsAffected(), err
 }
 
-func (t pgxTxAdapter) Query(ctx context.Context, sql string, args ...any) (Rows, error) {
-	rows, err := t.tx.Query(ctx, sql, args...)
+func (a pgxProviderAdapter) Query(ctx context.Context, sql string, args ...any) (Rows, error) {
+	rows, err := a.src.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	return pgxRowsAdapter{rows: rows}, nil
 }
 
-func (t pgxTxAdapter) QueryRow(ctx context.Context, sql string, args ...any) Row {
-	return pgxRowAdapter{row: t.tx.QueryRow(ctx, sql, args...)}
+func (a pgxProviderAdapter) QueryRow(ctx context.Context, sql string, args ...any) Row {
+	return pgxRowAdapter{row: a.src.QueryRow(ctx, sql, args...)}
 }
 
-func (t pgxTxAdapter) Begin(ctx context.Context) (Tx, error) {
-	tx, err := t.tx.Begin(ctx)
+// Begin opens a transaction and wraps it in pgxTxAdapter so savepoints stay
+// invisible to callers.
+func (a pgxProviderAdapter) Begin(ctx context.Context) (Tx, error) {
+	tx, err := a.src.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return pgxTxAdapter{tx: tx}, nil
+	return newPgxTxAdapter(tx), nil
+}
+
+// pgxTxAdapter adapts a pgx.Tx to the framework Tx. It embeds pgxProviderAdapter
+// for the query surface and adds Commit/Rollback.
+type pgxTxAdapter struct {
+	pgxProviderAdapter
+	tx pgx.Tx
+}
+
+func newPgxTxAdapter(tx pgx.Tx) pgxTxAdapter {
+	return pgxTxAdapter{
+		pgxProviderAdapter: pgxProviderAdapter{src: tx},
+		tx:                 tx,
+	}
 }
 
 func (t pgxTxAdapter) Commit(ctx context.Context) error {
@@ -84,38 +111,13 @@ func (t pgxTxAdapter) Rollback(ctx context.Context) error {
 // point for callers who own a pool directly (tests, non-Lifecycle deployments).
 // Repositories never see it.
 type poolAdapter struct {
-	pool *pgxpool.Pool
-}
-
-func (a poolAdapter) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
-	tag, err := a.pool.Exec(ctx, sql, args...)
-	return tag.RowsAffected(), err
-}
-
-func (a poolAdapter) Query(ctx context.Context, sql string, args ...any) (Rows, error) {
-	rows, err := a.pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	return pgxRowsAdapter{rows: rows}, nil
-}
-
-func (a poolAdapter) QueryRow(ctx context.Context, sql string, args ...any) Row {
-	return pgxRowAdapter{row: a.pool.QueryRow(ctx, sql, args...)}
-}
-
-func (a poolAdapter) Begin(ctx context.Context) (Tx, error) {
-	tx, err := a.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return pgxTxAdapter{tx: tx}, nil
+	pgxProviderAdapter
 }
 
 // NewPoolProvider wraps a *pgxpool.Pool as a TxProvider. Use it at wiring time
 // when you own a pool directly rather than going through PostgresDB.
 func NewPoolProvider(pool *pgxpool.Pool) TxProvider {
-	return poolAdapter{pool: pool}
+	return poolAdapter{pgxProviderAdapter: pgxProviderAdapter{src: pool}}
 }
 
 var _ TxProvider = poolAdapter{}

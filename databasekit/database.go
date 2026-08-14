@@ -200,7 +200,7 @@ func (db *PostgresDB) begin(ctx context.Context) (Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgxTxAdapter{tx: tx}, nil
+	return newPgxTxAdapter(tx), nil
 }
 
 // txProviderAdapter wraps a PostgresDB to present only the TxProvider interface.
