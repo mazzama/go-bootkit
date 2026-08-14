@@ -3,6 +3,7 @@ package cachekit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -33,9 +34,14 @@ func (JSONCodec) Unmarshal(data []byte, v any) error {
 // DefaultCodec is the default JSON codec used by RedisCache and MemoryCache.
 var DefaultCodec Codec = JSONCodec{}
 
+// ErrCacheMiss is returned by Cache implementations when a requested key is not found.
+var ErrCacheMiss = errors.New("cache miss")
+
 // Cache is the interface for generic cache operations. RedisCache satisfies it;
 // for tests, use memcache.New() from the cachekit/memcache sub-package.
 type Cache interface {
+	// Get retrieves a cached value by key and unmarshals it into dest.
+	// On a cache miss, Get returns an error satisfying errors.Is(err, ErrCacheMiss).
 	Get(ctx context.Context, key string, dest any) error
 	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
 	Delete(ctx context.Context, key string) error
@@ -177,6 +183,9 @@ func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, exp
 func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
 	str, err := r.Client().Get(ctx, key).Result()
 	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return fmt.Errorf("%s: %w", key, ErrCacheMiss)
+		}
 		return err
 	}
 	return r.codecOrDefault().Unmarshal([]byte(str), dest)
@@ -202,4 +211,5 @@ func (r *RedisCache) HealthChecks() []healthkit.Check {
 }
 
 var _ core.Component = (*RedisCache)(nil)
+var _ core.Readyable = (*RedisCache)(nil)
 var _ Cache = (*RedisCache)(nil)

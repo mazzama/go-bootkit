@@ -2,9 +2,11 @@ package memcache_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/cachekit/memcache"
 )
 
@@ -92,6 +94,9 @@ func TestMemoryCache(t *testing.T) {
 	err = cache.Get(ctx, "missing", &dest)
 	if err == nil {
 		t.Fatalf("expected error on cache miss")
+	}
+	if !errors.Is(err, cachekit.ErrCacheMiss) {
+		t.Fatalf("expected errors.Is(err, cachekit.ErrCacheMiss), got: %v", err)
 	}
 
 	// Test Set with unmarshalable value (e.g. channel) to cover error path
