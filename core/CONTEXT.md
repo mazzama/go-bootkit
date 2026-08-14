@@ -20,7 +20,11 @@ _Avoid_: HealthChecker, HealthCheckSource
 An exported interface (`Ready() &lt;-chan struct{}`) signalling that a component has an observable readiness channel. `Lifecycle` implements `Readyable`. The runner and `TxManager` accept `Readyable` rather than duck-typing. New adapters should implement `Readyable` for compile-time safety.
 
 **Lifecycle**:
-An embeddable struct that provides robust, unified lifecycle management (`Start`, `Stop`, `Ready`) for infrastructure adapters. It handles concurrent readiness signals and release-exactly-once semantics. `Lifecycle` implements `Readyable`.
+An embeddable struct that provides robust, unified lifecycle management (`Start`, `Stop`, `Ready`, `WaitReady`) for infrastructure adapters. It handles concurrent readiness signals and release-exactly-once semantics. `Lifecycle` implements `Readyable`.
+
+**WaitReady**:
+The single owner of the "wait until connected, honour the deadline" invariant. A free function `WaitReady(ctx, ready <-chan struct{}) error` for callers holding a `Readyable`, plus a `Lifecycle.WaitReady(ctx)` method for adapters that embed it. Callers no longer hand-roll a `select` over `Ready()` and `ctx.Done()`.
+_Avoid_: IsReady, AwaitReady
 
 **StandardChecks**:
 A builder function in `healthkit` returning standard `Liveness` (nop) and `Readiness` (timed) checks for infrastructure components.

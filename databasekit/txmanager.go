@@ -2,73 +2,113 @@ package databasekit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/mazzama/go-bootkit/core"
 )
 
+// ErrNoRows is the framework-native no-rows sentinel. It is the only error a
+// repository must recognize by identity when a single-row query returns nothing.
+// The pgx adapter rewrites pgx.ErrNoRows to it, so repositories never import pgx.
+var ErrNoRows = errors.New("databasekit: no rows in result set")
+
+// ErrTxClosed marks an operation on a committed or rolled-back transaction.
+// The pgx adapter rewrites pgx.ErrTxClosed to it, so WithTx never names pgx.
+var ErrTxClosed = errors.New("databasekit: transaction is closed")
+
+// Row is the result of a single-row query. The error is deferred: everything —
+// readiness-gate failure, no rows, driver error — surfaces at Scan. It never
+// returns nil and never returns an error at call time. Scan is callable exactly
+// once.
+type Row interface {
+	Scan(dest ...any) error
+}
+
+// Rows is a multi-row result. It owns a connection until Close or exhaustion.
+// Next/Scan/Err follow database/sql ordering: loop Next, Scan inside the loop,
+// then check Err after the loop. Close is idempotent.
+type Rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+	Close()
+}
+
+// Querier is the pgx-free query surface. Callers never import pgx or pgconn,
+// and never mention pgx.Row, pgx.Rows, or pgconn.CommandTag.
+type Querier interface {
+	Exec(ctx context.Context, sql string, args ...any) (int64, error)
+	Query(ctx context.Context, sql string, args ...any) (Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) Row
+}
+
+// Tx is a live transaction: a Querier that can commit, roll back, and open
+// nested savepoints.
+type Tx interface {
+	TxProvider
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
+}
+
+// TxProvider extends Querier with a transaction-opening entry point.
+// Begin returns the framework Tx, not pgx.Tx.
+type TxProvider interface {
+	Querier
+	Begin(ctx context.Context) (Tx, error)
+}
+
+// QuerierResolver resolves a Querier from context, allowing repositories to
+// depend on a seam rather than the concrete TxManager.
+type QuerierResolver interface {
+	QuerierFromContext(ctx context.Context) Querier
+}
+
 type txKey struct{}
+
+// errRow is a Row whose Scan returns a fixed error. It carries readiness-gate
+// failures and nil-pool guards through the deferred QueryRow contract.
 type errRow struct{ err error }
 
 func (e errRow) Scan(dest ...any) error {
 	return e.err
 }
 
+// readyQuerier gates a TxProvider on readiness before delegating, so a query
+// issued before the pool connects blocks up to ctx's deadline rather than
+// racing the connection.
 type readyQuerier struct {
 	provider TxProvider
 }
 
 func (r readyQuerier) wait(ctx context.Context) error {
 	if rd, ok := r.provider.(core.Readyable); ok {
-		select {
-		case <-rd.Ready():
-			return nil
-		case <-ctx.Done():
-			return fmt.Errorf("pool not ready: %w", ctx.Err())
+		if err := core.WaitReady(ctx, rd.Ready()); err != nil {
+			return fmt.Errorf("pool not ready: %w", err)
 		}
 	}
 	return nil
 }
 
-func (r readyQuerier) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+func (r readyQuerier) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
 	if err := r.wait(ctx); err != nil {
-		return pgconn.CommandTag{}, err
+		return 0, err
 	}
-	return r.provider.Exec(ctx, sql, arguments...)
+	return r.provider.Exec(ctx, sql, args...)
 }
 
-func (r readyQuerier) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (r readyQuerier) Query(ctx context.Context, sql string, args ...any) (Rows, error) {
 	if err := r.wait(ctx); err != nil {
 		return nil, err
 	}
 	return r.provider.Query(ctx, sql, args...)
 }
 
-func (r readyQuerier) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (r readyQuerier) QueryRow(ctx context.Context, sql string, args ...any) Row {
 	if err := r.wait(ctx); err != nil {
 		return errRow{err: err}
 	}
 	return r.provider.QueryRow(ctx, sql, args...)
-}
-
-// QuerierResolver resolves a Querier from context, allowing repositories to depend
-// on a seam rather than the concrete TxManager.
-type QuerierResolver interface {
-	QuerierFromContext(ctx context.Context) Querier
-}
-
-// Querier is an interface that represents the common methods between pgxpool.Pool and pgx.Tx.
-type Querier interface {
-	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
-}
-
-type TxProvider interface {
-	Querier
-	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 type TxManager struct {
@@ -79,13 +119,14 @@ func NewTxManager(provider TxProvider) *TxManager {
 	return &TxManager{provider: provider}
 }
 
-// TxFromContext returns the pgx.Tx from the context if it exists.
-func TxFromContext(ctx context.Context) (pgx.Tx, bool) {
-	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
+// TxFromContext returns the active framework Tx from the context, if any.
+func TxFromContext(ctx context.Context) (Tx, bool) {
+	tx, ok := ctx.Value(txKey{}).(Tx)
 	return tx, ok
 }
 
-// QuerierFromContext returns the pgx.Tx from the context if it exists, otherwise it returns the configured TxProvider.
+// QuerierFromContext returns the active Tx if one is on the context, otherwise
+// the configured TxProvider — readiness-gated when it is Readyable.
 func (tm *TxManager) QuerierFromContext(ctx context.Context) Querier {
 	if tx, ok := TxFromContext(ctx); ok {
 		return tx
@@ -96,28 +137,25 @@ func (tm *TxManager) QuerierFromContext(ctx context.Context) Querier {
 	return tm.provider
 }
 
-// WithTx executes the provided function within a transaction.
-// If a transaction already exists in the context, a nested transaction (savepoint) is created.
+// WithTx executes fn within a transaction. If a transaction already exists on
+// the context, a nested savepoint is created instead.
 func (tm *TxManager) WithTx(ctx context.Context, fn func(ctx context.Context) error) error {
-	var tx pgx.Tx
+	var tx Tx
 	var err error
 
 	existingTx, hasTx := TxFromContext(ctx)
 	if hasTx {
-		// Create a nested transaction (savepoint) using the existing transaction
+		// Create a nested transaction (savepoint) using the existing transaction.
 		tx, err = existingTx.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to begin nested transaction (savepoint): %w", err)
 		}
 	} else {
 		if rd, ok := tm.provider.(core.Readyable); ok {
-			select {
-			case <-rd.Ready():
-			case <-ctx.Done():
-				return fmt.Errorf("pool not ready: %w", ctx.Err())
+			if err := core.WaitReady(ctx, rd.Ready()); err != nil {
+				return fmt.Errorf("pool not ready: %w", err)
 			}
 		}
-		// Begin a new transaction from the provider
 		tx, err = tm.provider.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to begin transaction: %w", err)
@@ -125,16 +163,15 @@ func (tm *TxManager) WithTx(ctx context.Context, fn func(ctx context.Context) er
 	}
 
 	defer func() {
-		// Rollback if there's a panic or if the transaction hasn't been committed/rolled back yet.
-		// pgx.Tx.Rollback is a no-op if the transaction is already closed.
+		// Rollback if there's a panic or if the transaction hasn't been committed
+		// or rolled back yet. Rollback is a no-op on an already-closed transaction.
 		_ = tx.Rollback(ctx)
 	}()
 
-	// Put the new transaction in context
 	ctxWithTx := context.WithValue(ctx, txKey{}, tx)
 
 	if err := fn(ctxWithTx); err != nil {
-		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && rollbackErr != pgx.ErrTxClosed {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, ErrTxClosed) {
 			return fmt.Errorf("transaction failed: %v, rollback failed: %v", err, rollbackErr)
 		}
 		return err

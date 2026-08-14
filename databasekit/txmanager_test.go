@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/stretchr/testify/assert"
@@ -27,48 +25,48 @@ func (m *MockReadyProvider) Ready() <-chan struct{} {
 
 var _ core.Readyable = (*MockReadyProvider)(nil)
 
-func (m *MockProvider) Begin(ctx context.Context) (pgx.Tx, error) {
+func (m *MockProvider) Begin(ctx context.Context) (databasekit.Tx, error) {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(pgx.Tx), args.Error(1)
+	return args.Get(0).(databasekit.Tx), args.Error(1)
 }
 
-func (m *MockProvider) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
-	callArgs := append([]interface{}{ctx, sql}, arguments...)
+func (m *MockProvider) Exec(ctx context.Context, sql string, arguments ...any) (int64, error) {
+	callArgs := append([]any{ctx, sql}, arguments...)
 	args := m.Called(callArgs...)
-	return args.Get(0).(pgconn.CommandTag), args.Error(1)
+	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockProvider) Query(ctx context.Context, sql string, arguments ...interface{}) (pgx.Rows, error) {
-	callArgs := append([]interface{}{ctx, sql}, arguments...)
+func (m *MockProvider) Query(ctx context.Context, sql string, arguments ...any) (databasekit.Rows, error) {
+	callArgs := append([]any{ctx, sql}, arguments...)
 	args := m.Called(callArgs...)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(pgx.Rows), args.Error(1)
+	return args.Get(0).(databasekit.Rows), args.Error(1)
 }
 
-func (m *MockProvider) QueryRow(ctx context.Context, sql string, arguments ...interface{}) pgx.Row {
-	callArgs := append([]interface{}{ctx, sql}, arguments...)
+func (m *MockProvider) QueryRow(ctx context.Context, sql string, arguments ...any) databasekit.Row {
+	callArgs := append([]any{ctx, sql}, arguments...)
 	args := m.Called(callArgs...)
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(pgx.Row)
+	return args.Get(0).(databasekit.Row)
 }
 
 type MockTx struct {
 	mock.Mock
 }
 
-func (m *MockTx) Begin(ctx context.Context) (pgx.Tx, error) {
+func (m *MockTx) Begin(ctx context.Context) (databasekit.Tx, error) {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(pgx.Tx), args.Error(1)
+	return args.Get(0).(databasekit.Tx), args.Error(1)
 }
 
 func (m *MockTx) Commit(ctx context.Context) error {
@@ -79,57 +77,28 @@ func (m *MockTx) Rollback(ctx context.Context) error {
 	return m.Called(ctx).Error(0)
 }
 
-func (m *MockTx) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) {
-	args := m.Called(ctx, tableName, columnNames, rowSrc)
+func (m *MockTx) Exec(ctx context.Context, sql string, arguments ...any) (int64, error) {
+	callArgs := append([]any{ctx, sql}, arguments...)
+	args := m.Called(callArgs...)
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
-	args := m.Called(ctx, b)
-	if args.Get(0) == nil {
-		return nil
-	}
-	return args.Get(0).(pgx.BatchResults)
-}
-
-func (m *MockTx) LargeObjects() pgx.LargeObjects {
-	return pgx.LargeObjects{}
-}
-
-func (m *MockTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) {
-	args := m.Called(ctx, name, sql)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*pgconn.StatementDescription), args.Error(1)
-}
-
-func (m *MockTx) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
-	callArgs := append([]interface{}{ctx, sql}, arguments...)
-	args := m.Called(callArgs...)
-	return args.Get(0).(pgconn.CommandTag), args.Error(1)
-}
-
-func (m *MockTx) Query(ctx context.Context, sql string, arguments ...interface{}) (pgx.Rows, error) {
-	callArgs := append([]interface{}{ctx, sql}, arguments...)
+func (m *MockTx) Query(ctx context.Context, sql string, arguments ...any) (databasekit.Rows, error) {
+	callArgs := append([]any{ctx, sql}, arguments...)
 	args := m.Called(callArgs...)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(pgx.Rows), args.Error(1)
+	return args.Get(0).(databasekit.Rows), args.Error(1)
 }
 
-func (m *MockTx) QueryRow(ctx context.Context, sql string, arguments ...interface{}) pgx.Row {
-	callArgs := append([]interface{}{ctx, sql}, arguments...)
+func (m *MockTx) QueryRow(ctx context.Context, sql string, arguments ...any) databasekit.Row {
+	callArgs := append([]any{ctx, sql}, arguments...)
 	args := m.Called(callArgs...)
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(pgx.Row)
-}
-
-func (m *MockTx) Conn() *pgx.Conn {
-	return nil
+	return args.Get(0).(databasekit.Row)
 }
 
 func TestTxManager(t *testing.T) {
@@ -151,10 +120,10 @@ func TestTxManager(t *testing.T) {
 		provider.On("Begin", mock.Anything).Return(mockTx, nil)
 		mockTx.On("Commit", mock.Anything).Return(nil)
 		// Deferred rollback when successful is either no-op or returns ErrTxClosed
-		mockTx.On("Rollback", mock.Anything).Return(pgx.ErrTxClosed)
+		mockTx.On("Rollback", mock.Anything).Return(databasekit.ErrTxClosed)
 
 		// Assert query logic inside the transaction works
-		mockTx.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item1')").Return(pgconn.CommandTag{}, nil)
+		mockTx.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item1')").Return(int64(0), nil)
 
 		err := tm.WithTx(ctx, func(ctxTx context.Context) error {
 			querier := tm.QuerierFromContext(ctxTx)
@@ -176,7 +145,7 @@ func TestTxManager(t *testing.T) {
 		provider.On("Begin", mock.Anything).Return(mockTx, nil)
 		mockTx.On("Rollback", mock.Anything).Return(nil)
 
-		mockTx.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item2')").Return(pgconn.CommandTag{}, nil)
+		mockTx.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item2')").Return(int64(0), nil)
 
 		expectedErr := fmt.Errorf("intentional rollback")
 		err := tm.WithTx(ctx, func(ctxTx context.Context) error {
@@ -200,14 +169,14 @@ func TestTxManager(t *testing.T) {
 
 		provider.On("Begin", mock.Anything).Return(mockTxOuter, nil)
 		mockTxOuter.On("Commit", mock.Anything).Return(nil)
-		mockTxOuter.On("Rollback", mock.Anything).Return(pgx.ErrTxClosed)
+		mockTxOuter.On("Rollback", mock.Anything).Return(databasekit.ErrTxClosed)
 
 		mockTxOuter.On("Begin", mock.Anything).Return(mockTxInner, nil)
 		mockTxInner.On("Commit", mock.Anything).Return(nil)
-		mockTxInner.On("Rollback", mock.Anything).Return(pgx.ErrTxClosed)
+		mockTxInner.On("Rollback", mock.Anything).Return(databasekit.ErrTxClosed)
 
-		mockTxOuter.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item3')").Return(pgconn.CommandTag{}, nil)
-		mockTxInner.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item4')").Return(pgconn.CommandTag{}, nil)
+		mockTxOuter.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item3')").Return(int64(0), nil)
+		mockTxInner.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item4')").Return(int64(0), nil)
 
 		err := tm.WithTx(ctx, func(ctxTx1 context.Context) error {
 			q1 := tm.QuerierFromContext(ctxTx1)
@@ -238,13 +207,13 @@ func TestTxManager(t *testing.T) {
 
 		provider.On("Begin", mock.Anything).Return(mockTxOuter, nil)
 		mockTxOuter.On("Commit", mock.Anything).Return(nil)
-		mockTxOuter.On("Rollback", mock.Anything).Return(pgx.ErrTxClosed)
+		mockTxOuter.On("Rollback", mock.Anything).Return(databasekit.ErrTxClosed)
 
 		mockTxOuter.On("Begin", mock.Anything).Return(mockTxInner, nil)
 		mockTxInner.On("Rollback", mock.Anything).Return(nil)
 
-		mockTxOuter.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item5')").Return(pgconn.CommandTag{}, nil)
-		mockTxInner.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item6')").Return(pgconn.CommandTag{}, nil)
+		mockTxOuter.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item5')").Return(int64(0), nil)
+		mockTxInner.On("Exec", mock.Anything, "INSERT INTO items (name) VALUES ('item6')").Return(int64(0), nil)
 
 		expectedErr := fmt.Errorf("nested intentional rollback")
 
@@ -274,7 +243,7 @@ func TestTxManager(t *testing.T) {
 		provider := &MockReadyProvider{readyChan: readyChan}
 		tm := databasekit.NewTxManager(provider)
 
-		provider.On("Exec", mock.Anything, "SELECT 1").Return(pgconn.CommandTag{}, nil)
+		provider.On("Exec", mock.Anything, "SELECT 1").Return(int64(0), nil)
 		provider.On("Query", mock.Anything, "SELECT 1").Return(nil, nil)
 		provider.On("QueryRow", mock.Anything, "SELECT 1").Return(nil)
 
@@ -315,7 +284,7 @@ func TestTxManager(t *testing.T) {
 		provider := new(MockProvider)
 		tm := databasekit.NewTxManager(provider)
 
-		provider.On("Exec", mock.Anything, "SELECT 1").Return(pgconn.CommandTag{}, nil)
+		provider.On("Exec", mock.Anything, "SELECT 1").Return(int64(0), nil)
 		provider.On("Query", mock.Anything, "SELECT 1").Return(nil, nil)
 		provider.On("QueryRow", mock.Anything, "SELECT 1").Return(nil)
 

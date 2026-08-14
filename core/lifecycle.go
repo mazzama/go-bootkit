@@ -87,6 +87,24 @@ func (l *Lifecycle) Stop(ctx context.Context) error {
 	return nil
 }
 
+// WaitReady blocks until the readiness channel is closed or ctx is cancelled.
+// It returns nil once ready, or ctx.Err() when the context is cancelled first.
+func WaitReady(ctx context.Context, ready <-chan struct{}) error {
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// WaitReady blocks until the Lifecycle is ready or ctx is cancelled. It is the
+// canonical "wait until connected, honour the deadline" used by adapters that
+// embed Lifecycle.
+func (l *Lifecycle) WaitReady(ctx context.Context) error {
+	return WaitReady(ctx, l.Ready())
+}
+
 // Ready returns a channel that is closed when the component has successfully connected.
 func (l *Lifecycle) Ready() <-chan struct{} {
 	l.initReady()
