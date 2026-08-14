@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/cachekit"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/databasekit"
@@ -80,12 +79,12 @@ func run() error {
 	handler := NewHandler(service, logger)
 
 	// Set up background worker (client + server)
-	redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr, Password: cfg.RedisPassword}
-	asyncClient := workerkit.NewAsynqClient("notification-client", redisOpt)
+	workerRedis := workerkit.RedisConfig{Addr: cfg.RedisAddr, Password: cfg.RedisPassword}
+	asyncClient := workerkit.NewAsynqClient("notification-client", workerRedis)
 	asyncServer := workerkit.NewAsynqServer(
 		"notification-worker",
-		redisOpt,
-		asynq.Config{Concurrency: 5},
+		workerRedis,
+		workerkit.ServerConfig{Concurrency: 5},
 	)
 
 	// Register handlers

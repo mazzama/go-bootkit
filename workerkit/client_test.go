@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 
@@ -17,7 +16,7 @@ func TestAsynqClient_LifecycleAndEnqueue(t *testing.T) {
 	}
 	defer mr.Close()
 
-	redisOpt := asynq.RedisClientOpt{Addr: mr.Addr()}
+	redisOpt := workerkit.RedisConfig{Addr: mr.Addr()}
 	client := workerkit.NewAsynqClient("test-client", redisOpt)
 
 	if client.Name() != "test-client" {
@@ -82,7 +81,7 @@ func TestAsynqClient_LifecycleAndEnqueue(t *testing.T) {
 }
 
 func TestAsynqClient_Enqueue_NotReady(t *testing.T) {
-	redisOpt := asynq.RedisClientOpt{Addr: "localhost:9999"}
+	redisOpt := workerkit.RedisConfig{Addr: "localhost:9999"}
 	client := workerkit.NewAsynqClient("test-client", redisOpt)
 
 	task := workerkit.Task{Type: "test:task"}

@@ -8,6 +8,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
+	"time"
 )
 
 type AsynqServer struct {
@@ -18,8 +19,8 @@ type AsynqServer struct {
 	logger *slog.Logger
 }
 
-func NewAsynqServer(name string, redisOpt asynq.RedisConnOpt, cfg asynq.Config) *AsynqServer {
-	server := asynq.NewServer(redisOpt, cfg)
+func NewAsynqServer(name string, redisCfg RedisConfig, cfg ServerConfig) *AsynqServer {
+	server := asynq.NewServer(redisCfg.toAsynqOpt(), cfg.toAsynqConfig())
 	mux := asynq.NewServeMux()
 
 	s := &AsynqServer{
@@ -57,6 +58,23 @@ func NewAsynqServer(name string, redisOpt asynq.RedisConnOpt, cfg asynq.Config) 
 	})
 
 	return s
+}
+
+func (sc ServerConfig) toAsynqConfig() asynq.Config {
+	cfg := asynq.Config{
+		Concurrency:    sc.Concurrency,
+		Queues:         sc.Queues,
+		StrictPriority: sc.StrictPriority,
+	}
+	if sc.ShutdownTimeout > 0 {
+		cfg.ShutdownTimeout = sc.ShutdownTimeout
+	}
+	if sc.RetryDelayFunc != nil {
+		cfg.RetryDelayFunc = func(n int, err error, t *asynq.Task) time.Duration {
+			return sc.RetryDelayFunc(n, err, Task{Type: t.Type(), Payload: t.Payload()})
+		}
+	}
+	return cfg
 }
 
 func (s *AsynqServer) Mux() *asynq.ServeMux {
