@@ -32,4 +32,5 @@ go.work.sum
 .vscode/
 .commandcode/
 
-orders
+# Compiled example binary
+/examples/orders/orders

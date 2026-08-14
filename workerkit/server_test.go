@@ -72,9 +72,11 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 	go func() {
 		errCh <- server.Start(ctx)
 	}()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
 	select {
 	case <-server.Ready():
-	case <-time.After(time.Second):
+	case <-timer.C:
 		t.Fatal("server did not become ready")
 	}
 
@@ -83,9 +85,11 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 	go func() {
 		clientCh <- client.Start(ctx)
 	}()
+	timer = time.NewTimer(time.Second)
+	defer timer.Stop()
 	select {
 	case <-client.Ready():
-	case <-time.After(time.Second):
+	case <-timer.C:
 		t.Fatal("client did not become ready")
 	}
 
@@ -94,6 +98,8 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 		t.Fatalf("Enqueue failed: %v", err)
 	}
 
+	handlerTimer := time.NewTimer(5 * time.Second)
+	defer handlerTimer.Stop()
 	select {
 	case gotTask := <-got:
 		if gotTask.Type != "notification:send" {
@@ -102,7 +108,7 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 		if string(gotTask.Payload) != `{"to":"user@example.com"}` {
 			t.Errorf("expected payload to match, got %q", string(gotTask.Payload))
 		}
-	case <-time.After(5 * time.Second):
+	case <-handlerTimer.C:
 		t.Fatal("handler did not receive task within timeout")
 	}
 
@@ -112,4 +118,19 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 	if err := server.Stop(ctx); err != nil {
 		t.Errorf("server Stop failed: %v", err)
 	}
+
+	// Start returns ctx.Err() once the context is cancelled; drain both
+	// goroutines so they don't outlive the test.
+	cancel()
+	waitErr := func(ch <-chan error, name string) {
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-ch:
+		case <-timer.C:
+			t.Errorf("%s did not return after cancel", name)
+		}
+	}
+	waitErr(errCh, "server.Start")
+	waitErr(clientCh, "client.Start")
 }

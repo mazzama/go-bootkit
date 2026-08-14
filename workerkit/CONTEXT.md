@@ -4,13 +4,13 @@ The `workerkit` module integrates `hibiken/asynq` (a Redis-backed background job
 
 ## Glossary
 
-- **Enqueuer**: Interface for enqueueing background tasks (`Enqueue`, `EnqueueContext`). Accepts framework `Task` values — callers never import `asynq`. `AsynqClient` implements it for production; `InMemoryClient` in `workerkit/memqueue` implements it for tests.
+- **Enqueuer**: Interface for enqueueing background tasks (`Enqueue`, `EnqueueContext`). Accepts framework `Task` values — domain code never imports `asynq` (only wiring code does, for `RedisConnOpt`). `AsynqClient` implements it for production; `InMemoryClient` in `workerkit/memqueue` implements it for tests.
 - **Task**: Framework-native unit of work (`Type string`, `Payload []byte`). Decoupled from `asynq.Task`. Adapters map to backend-specific types internally.
-- **Handler**: Framework-native task processor (`func(ctx context.Context, task Task) error`). Domain handlers accept `workerkit.Task` and never import `asynq`. Registered via `AsynqServer.HandleFunc`.
+- **Handler**: Framework-native task processor (`func(ctx context.Context, task Task) error`). Domain handlers accept `workerkit.Task` and never import `asynq` (only wiring code — `main.go` — touches asynq types like `RedisConnOpt`/`Config`). Registered via `AsynqServer.HandleFunc`. Handlers receive only the task `Type` and `Payload`; asynq-specific features like result writing or headers require dropping to `Mux()`.
 - **TaskInfo**: Metadata about an enqueued task (`ID`, `Type`, `Queue`, `State`).
 - **EnqueueOption**: Functional options for task enqueueing (`WithQueue`, `WithMaxRetry`, `WithDeadline`, `WithProcessIn`, `WithProcessAt`, `WithUnique`, `WithTimeout`, `WithRetention`, `WithGroup`). Mapped to asynq options inside `AsynqClient`.
 - **AsynqClient**: Production adapter. Implements `Enqueuer` and `core.Component`. Readiness-gates task enqueueing so callers don't enqueue before the Redis connection is live.
-- **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Exposes `HandleFunc(pattern, handler)` for framework-native handler registration and `Mux()` as an escape hatch for advanced asynq features (middleware, group aggregation).
+- **AsynqServer**: Production adapter for processing tasks. Implements `core.Component`. Exposes `HandleFunc(pattern, handler)` for framework-native handler registration and `Mux()` as an escape hatch for asynq middleware. Group aggregation is configured via the `asynq.Config` passed to `NewAsynqServer`, not via `Mux()`.
 - **InMemoryClient**: Test adapter in `workerkit/memqueue`. Stores enqueued tasks in a slice. Never returns errors (unless context is cancelled). Use `Tasks()` to inspect and `Reset()` between tests.
 
 ## Architecture
@@ -95,7 +95,7 @@ func TestSend(t *testing.T) {
 
 ### 5. Process Tasks
 
-Handlers accept the framework-native `workerkit.Task` — no asynq import needed:
+Handlers accept the framework-native `workerkit.Task` — domain code needs no asynq import:
 
 ```go
 func HandleEmailDelivery(ctx context.Context, t workerkit.Task) error {
@@ -104,8 +104,11 @@ func HandleEmailDelivery(ctx context.Context, t workerkit.Task) error {
 }
 ```
 
-For advanced asynq features (middleware, group aggregation), `AsynqServer.Mux()` remains available as an escape hatch — it returns the raw `*asynq.ServeMux`.
+The framework `Handler` receives only the task `Type` and `Payload`. If a handler
+needs asynq-specific features (writing a task result, reading headers, or
+middleware), register it directly on `AsynqServer.Mux()` — it returns the raw
+`*asynq.ServeMux`. Group aggregation is configured via `asynq.Config`, not the mux.
 
 ## Configuration
 
-`NewAsynqServer` accepts `asynq.Config` directly for dead-letter queues, strict priority queues, and custom retry delays.
+`NewAsynqServer` accepts `asynq.Config` directly for dead-letter queues, strict priority queues, group aggregation, and custom retry delays.
