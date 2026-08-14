@@ -23,13 +23,13 @@ jobs:
       - name: Setup Go Workspace
         run: |
           go work init
-          go work use ./core ./cachekit ./databasekit ./serverkit
+          go work use ./core ./cachekit ./databasekit ./serverkit ./workerkit ./examples/orders
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-          args: --timeout=5m ./core/... ./serverkit/... ./cachekit/... ./databasekit/...
+          args: --timeout=5m ./core/... ./serverkit/... ./cachekit/... ./databasekit/... ./workerkit/...
 
   test:
     name: Test
@@ -47,7 +47,7 @@ jobs:
       - name: Setup Go Workspace
         run: |
           go work init
-          go work use ./core ./cachekit ./databasekit ./serverkit
+          go work use ./core ./cachekit ./databasekit ./serverkit ./workerkit ./examples/orders
 
       - name: Download Go modules
         run: go work sync
@@ -55,7 +55,7 @@ jobs:
       - name: Run tests
         run: |
           go test -v -race -coverprofile=coverage.txt -covermode=atomic \
-            ./core/... ./serverkit/... ./cachekit/... ./databasekit/...
+            ./core/... ./serverkit/... ./cachekit/... ./databasekit/... ./workerkit/...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -80,7 +80,7 @@ jobs:
       - name: Setup Go Workspace
         run: |
           go work init
-          go work use ./core ./cachekit ./databasekit ./serverkit
+          go work use ./core ./cachekit ./databasekit ./serverkit ./workerkit ./examples/orders
 
       - name: Build all modules
-        run: go build ./core/... ./cachekit/... ./databasekit/... ./serverkit/...
+        run: go build ./core/... ./cachekit/... ./databasekit/... ./serverkit/... ./workerkit/...
