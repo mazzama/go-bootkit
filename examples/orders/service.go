@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -59,7 +60,7 @@ func (s *OrderService) GetProduct(ctx context.Context, id int64) (Product, error
 	if err := s.cache.Get(ctx, key, &p); err == nil {
 		s.logger.DebugContext(ctx, "product cache hit", "product_id", id)
 		return p, nil
-	} else if err.Error() != "redis: nil" && err.Error() != "cache miss: "+key {
+	} else if !errors.Is(err, cachekit.ErrCacheMiss) {
 		// A malformed cache entry is logged, but we fall back to the DB.
 		s.logger.WarnContext(ctx, "cache error or malformed entry", "product_id", id, "error", err)
 	}

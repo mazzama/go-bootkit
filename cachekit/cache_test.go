@@ -2,12 +2,14 @@ package cachekit
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/redis/go-redis/v9"
 )
@@ -267,5 +269,44 @@ func TestNewRedisCacheValidation(t *testing.T) {
 				t.Errorf("NewRedisCache() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRedisCache_Get_CacheMiss(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cache, err := NewRedisCache(mr.Addr())
+	if err != nil {
+		t.Fatalf("failed to create redis cache: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- cache.Start(ctx)
+	}()
+
+	select {
+	case <-cache.Ready():
+	case <-time.After(time.Second):
+		t.Fatal("cache did not become ready")
+	}
+
+	var dest string
+	err = cache.Get(ctx, "nonexistent-key", &dest)
+	if err == nil {
+		t.Fatal("expected error on cache miss, got nil")
+	}
+	if !errors.Is(err, ErrCacheMiss) {
+		t.Fatalf("expected errors.Is(err, ErrCacheMiss), got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nonexistent-key") {
+		t.Errorf("expected error message to contain key, got %q", err.Error())
+	}
+
+	err = cache.Stop(ctx)
+	if err != nil {
+		t.Errorf("Stop failed: %v", err)
 	}
 }
