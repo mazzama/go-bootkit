@@ -287,9 +287,11 @@ func TestRedisCache_Get_CacheMiss(t *testing.T) {
 		errCh <- cache.Start(ctx)
 	}()
 
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
 	select {
 	case <-cache.Ready():
-	case <-time.After(time.Second):
+	case <-timer.C:
 		t.Fatal("cache did not become ready")
 	}
 
@@ -308,5 +310,65 @@ func TestRedisCache_Get_CacheMiss(t *testing.T) {
 	err = cache.Stop(ctx)
 	if err != nil {
 		t.Errorf("Stop failed: %v", err)
+	}
+
+	// Start returns ctx.Err() once the context is cancelled; drain it so the
+	// goroutine does not outlive the test.
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(time.Second):
+		t.Fatal("cache.Start did not return after cancel")
+	}
+}
+
+func TestRedisCache_Get_NonMissErrorPassesThrough(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cache, err := NewRedisCache(mr.Addr())
+	if err != nil {
+		t.Fatalf("failed to create redis cache: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- cache.Start(ctx)
+	}()
+
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-cache.Ready():
+	case <-timer.C:
+		t.Fatal("cache did not become ready")
+	}
+
+	// A cancelled context produces a real redis error, not a cache miss.
+	canceledCtx, cancelGet := context.WithCancel(context.Background())
+	cancelGet()
+	var dest string
+	err = cache.Get(canceledCtx, "key", &dest)
+	if err == nil {
+		t.Fatal("expected error for cancelled Get, got nil")
+	}
+	if errors.Is(err, ErrCacheMiss) {
+		t.Fatalf("expected non-miss error, got ErrCacheMiss: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+
+	err = cache.Stop(ctx)
+	if err != nil {
+		t.Errorf("Stop failed: %v", err)
+	}
+
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(time.Second):
+		t.Fatal("cache.Start did not return after cancel")
 	}
 }

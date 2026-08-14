@@ -54,7 +54,7 @@ func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
 	defer c.mu.Unlock()
 	v, ok := c.data[key]
 	if !ok {
-		return fmt.Errorf("cache miss: %s: %w", key, cachekit.ErrCacheMiss)
+		return fmt.Errorf("%s: %w", key, cachekit.ErrCacheMiss)
 	}
 	return c.codecOrDefault().Unmarshal([]byte(v), dest)
 }

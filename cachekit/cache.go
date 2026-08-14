@@ -184,7 +184,7 @@ func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
 	str, err := r.Client().Get(ctx, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return fmt.Errorf("cache miss: %s: %w", key, ErrCacheMiss)
+			return fmt.Errorf("%s: %w", key, ErrCacheMiss)
 		}
 		return err
 	}
@@ -211,4 +211,5 @@ func (r *RedisCache) HealthChecks() []healthkit.Check {
 }
 
 var _ core.Component = (*RedisCache)(nil)
+var _ core.Readyable = (*RedisCache)(nil)
 var _ Cache = (*RedisCache)(nil)
