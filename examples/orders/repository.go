@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/mazzama/go-bootkit/databasekit"
 )
 
@@ -55,7 +54,7 @@ func scanProduct(ctx context.Context, q databasekit.Querier, id int64, forUpdate
 
 	var p Product
 	err := q.QueryRow(ctx, sql, id).Scan(&p.ID, &p.Name, &p.Price, &p.Stock, &p.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, databasekit.ErrNoRows) {
 		return Product{}, ErrNotFound
 	}
 	if err != nil {
@@ -110,7 +109,7 @@ func (r *pgOrderRepository) GetByID(ctx context.Context, id int64) (Order, error
 		`SELECT id, product_id, quantity, total_cents, created_at FROM orders WHERE id = $1`,
 		id,
 	).Scan(&o.ID, &o.ProductID, &o.Quantity, &o.Total, &o.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, databasekit.ErrNoRows) {
 		return Order{}, ErrNotFound
 	}
 	if err != nil {

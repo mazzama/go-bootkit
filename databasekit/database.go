@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
@@ -168,32 +166,41 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 
 var _ core.Component = (*PostgresDB)(nil)
 
-func (db *PostgresDB) exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+func (db *PostgresDB) exec(ctx context.Context, sql string, args ...any) (int64, error) {
 	if db.pool == nil {
-		return pgconn.CommandTag{}, errors.New("database pool is not initialized")
+		return 0, errors.New("database pool is not initialized")
 	}
-	return db.pool.Exec(ctx, sql, arguments...)
+	tag, err := db.pool.Exec(ctx, sql, args...)
+	return tag.RowsAffected(), err
 }
 
-func (db *PostgresDB) query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (db *PostgresDB) query(ctx context.Context, sql string, args ...any) (Rows, error) {
 	if db.pool == nil {
 		return nil, errors.New("database pool is not initialized")
 	}
-	return db.pool.Query(ctx, sql, args...)
+	rows, err := db.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgxRowsAdapter{rows: rows}, nil
 }
 
-func (db *PostgresDB) queryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (db *PostgresDB) queryRow(ctx context.Context, sql string, args ...any) Row {
 	if db.pool == nil {
 		return errRow{err: errors.New("database pool is not initialized")}
 	}
-	return db.pool.QueryRow(ctx, sql, args...)
+	return pgxRowAdapter{row: db.pool.QueryRow(ctx, sql, args...)}
 }
 
-func (db *PostgresDB) begin(ctx context.Context) (pgx.Tx, error) {
+func (db *PostgresDB) begin(ctx context.Context) (Tx, error) {
 	if db.pool == nil {
 		return nil, errors.New("database pool is not initialized")
 	}
-	return db.pool.Begin(ctx)
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return newPgxTxAdapter(tx), nil
 }
 
 // txProviderAdapter wraps a PostgresDB to present only the TxProvider interface.
@@ -201,19 +208,19 @@ type txProviderAdapter struct {
 	db *PostgresDB
 }
 
-func (a txProviderAdapter) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
-	return a.db.exec(ctx, sql, arguments...)
+func (a txProviderAdapter) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	return a.db.exec(ctx, sql, args...)
 }
 
-func (a txProviderAdapter) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (a txProviderAdapter) Query(ctx context.Context, sql string, args ...any) (Rows, error) {
 	return a.db.query(ctx, sql, args...)
 }
 
-func (a txProviderAdapter) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (a txProviderAdapter) QueryRow(ctx context.Context, sql string, args ...any) Row {
 	return a.db.queryRow(ctx, sql, args...)
 }
 
-func (a txProviderAdapter) Begin(ctx context.Context) (pgx.Tx, error) {
+func (a txProviderAdapter) Begin(ctx context.Context) (Tx, error) {
 	return a.db.begin(ctx)
 }
 

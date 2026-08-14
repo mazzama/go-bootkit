@@ -59,10 +59,8 @@ func (c *AsynqClient) Enqueue(task Task, opts ...EnqueueOption) (*TaskInfo, erro
 
 // EnqueueContext schedules a framework Task with context propagation.
 func (c *AsynqClient) EnqueueContext(ctx context.Context, task Task, opts ...EnqueueOption) (*TaskInfo, error) {
-	select {
-	case <-c.Ready():
-	case <-ctx.Done():
-		return nil, fmt.Errorf("client not ready: %w", ctx.Err())
+	if err := c.WaitReady(ctx); err != nil {
+		return nil, fmt.Errorf("client not ready: %w", err)
 	}
 	aTask := asynq.NewTask(task.Type, task.Payload)
 	info, err := c.client.EnqueueContext(ctx, aTask, toAsynqOpts(opts)...)

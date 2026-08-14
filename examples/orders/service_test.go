@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/mazzama/go-bootkit/cachekit/memcache"
 	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/stretchr/testify/assert"
@@ -54,26 +52,33 @@ func (m *mockOrderRepo) GetByID(ctx context.Context, id int64) (Order, error) {
 
 type dummyTxProvider struct{}
 
-func (d dummyTxProvider) Begin(ctx context.Context) (pgx.Tx, error) {
+func (d dummyTxProvider) Begin(ctx context.Context) (databasekit.Tx, error) {
 	return &dummyTx{}, nil
 }
-func (d dummyTxProvider) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
-	return pgconn.CommandTag{}, nil
+func (d dummyTxProvider) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	return 0, nil
 }
-func (d dummyTxProvider) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (d dummyTxProvider) Query(ctx context.Context, sql string, args ...any) (databasekit.Rows, error) {
 	return nil, nil
 }
-func (d dummyTxProvider) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (d dummyTxProvider) QueryRow(ctx context.Context, sql string, args ...any) databasekit.Row {
 	return nil
 }
 
-type dummyTx struct {
-	pgx.Tx
-}
+type dummyTx struct{}
 
-func (d *dummyTx) Commit(ctx context.Context) error          { return nil }
-func (d *dummyTx) Rollback(ctx context.Context) error        { return nil }
-func (d *dummyTx) Begin(ctx context.Context) (pgx.Tx, error) { return d, nil }
+func (d *dummyTx) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	return 0, nil
+}
+func (d *dummyTx) Query(ctx context.Context, sql string, args ...any) (databasekit.Rows, error) {
+	return nil, nil
+}
+func (d *dummyTx) QueryRow(ctx context.Context, sql string, args ...any) databasekit.Row {
+	return nil
+}
+func (d *dummyTx) Begin(ctx context.Context) (databasekit.Tx, error) { return d, nil }
+func (d *dummyTx) Commit(ctx context.Context) error                  { return nil }
+func (d *dummyTx) Rollback(ctx context.Context) error                { return nil }
 
 func TestOrderService_CreateProduct(t *testing.T) {
 	ctx := context.Background()

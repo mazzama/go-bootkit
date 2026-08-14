@@ -36,7 +36,7 @@ type Order struct {
 
 // ProductRepository persists and retrieves products. Implementations read the
 // active transaction (if any) from the context via TxManager.QuerierFromContext,
-// so callers never pass a *pgx.Tx explicitly.
+// so callers never thread a transaction explicitly.
 type ProductRepository interface {
 	Create(ctx context.Context, name string, price, stock int64) (Product, error)
 	GetByID(ctx context.Context, id int64) (Product, error)

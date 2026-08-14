@@ -75,7 +75,7 @@ func (s *OrdersSuite) SetupSuite() {
 
 	// Wire the domain exactly as main does, over a provider backed by the pool.
 	logger := slog.New(slog.NewTextHandler(&discardWriter{}, nil))
-	txManager := databasekit.NewTxManager(pool)
+	txManager := databasekit.NewTxManager(databasekit.NewPoolProvider(pool))
 	s.cache = memcache.New()
 	service := NewOrderService(
 		txManager,
