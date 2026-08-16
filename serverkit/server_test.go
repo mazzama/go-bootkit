@@ -3,6 +3,7 @@ package serverkit
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -234,19 +235,7 @@ func TestDefaultRouter_NotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 Not Found, got %d", rec.Code)
-	}
-
-	expectedType := "application/json"
-	if got := rec.Header().Get("Content-Type"); got != expectedType {
-		t.Errorf("expected Content-Type %q, got %q", expectedType, got)
-	}
-
-	expectedBody := `{"error":{"code":"NOT_FOUND","message":"Resource not found"}}`
-	if strings.TrimSpace(rec.Body.String()) != expectedBody {
-		t.Errorf("expected body %q, got %q", expectedBody, rec.Body.String())
-	}
+	assertJSONError(t, rec, http.StatusNotFound, "NOT_FOUND", "Resource not found")
 }
 
 func TestDefaultRouter_MethodNotAllowed(t *testing.T) {
@@ -260,16 +249,18 @@ func TestDefaultRouter_MethodNotAllowed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405 Method Not Allowed, got %d", rec.Code)
-	}
+	assertJSONError(t, rec, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
+}
 
-	expectedType := "application/json"
-	if got := rec.Header().Get("Content-Type"); got != expectedType {
-		t.Errorf("expected Content-Type %q, got %q", expectedType, got)
+func assertJSONError(t *testing.T, rec *httptest.ResponseRecorder, expectedStatus int, code, msg string) {
+	t.Helper()
+	if rec.Code != expectedStatus {
+		t.Errorf("expected status %d, got %d", expectedStatus, rec.Code)
 	}
-
-	expectedBody := `{"error":{"code":"METHOD_NOT_ALLOWED","message":"Method not allowed"}}`
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", got)
+	}
+	expectedBody := fmt.Sprintf(`{"error":{"code":"%s","message":"%s"}}`, code, msg)
 	if strings.TrimSpace(rec.Body.String()) != expectedBody {
 		t.Errorf("expected body %q, got %q", expectedBody, rec.Body.String())
 	}

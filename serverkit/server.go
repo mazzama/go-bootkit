@@ -169,7 +169,7 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 		RecoverPanics: true,
 		Schema:        httplog.SchemaECS,
 		Skip: func(req *http.Request, respStatus int) bool {
-			return strings.HasPrefix(req.URL.Path, "/health")
+			return strings.HasPrefix(req.URL.Path, "/health") && respStatus < 500
 		},
 	}))
 
@@ -187,18 +187,21 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 	MountHealthRoutes(router, health)
 
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"Resource not found"}}`))
+		writeJSONError(w, http.StatusNotFound, "NOT_FOUND", "Resource not found")
 	})
 
 	router.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		_, _ = w.Write([]byte(`{"error":{"code":"METHOD_NOT_ALLOWED","message":"Method not allowed"}}`))
+		writeJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 	})
 
 	return router
+}
+
+func writeJSONError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	payload := fmt.Sprintf(`{"error":{"code":"%s","message":"%s"}}`, code, message)
+	_, _ = w.Write([]byte(payload))
 }
 
 func WithLogger(logger *slog.Logger) HTTPServerOption {
