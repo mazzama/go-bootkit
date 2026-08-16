@@ -251,7 +251,7 @@ func TestDefaultRouter_NotFound(t *testing.T) {
 
 func TestDefaultRouter_MethodNotAllowed(t *testing.T) {
 	handler := NewDefaultRouter(nil, nil)
-	
+
 	// Mount a GET route
 	handler.Get("/test", func(w http.ResponseWriter, r *http.Request) {})
 

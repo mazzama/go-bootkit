@@ -17,7 +17,6 @@ import (
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
-
 // Default HTTP server timeouts. These guard against slow clients and leaked
 // keepalive connections exhausting the server under load.
 const (
