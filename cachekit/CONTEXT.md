@@ -11,6 +11,11 @@ It is part of the core infrastructure layer of the application.
 - **RedisCache**: The specific implementation of `Cache` using Redis. Does not expose the raw `redis.Client` — all access flows through the `Cache` interface.
 - **MemoryCache**: In-memory test adapter in `cachekit/memcache`. Implements `Cache` without external dependencies.
 
+
+## Generics and Value Types (ADR 0007)
+
+- **Type-Safe Helpers**: Prefer package-level `cachekit.Get[T](...)` and `cachekit.Set[T](...)` helpers for type-safe caching over calling the raw interface methods, eliminating the need for manual `any` unmarshaling boilerplate.
+- **Strict Value Types**: To prioritize raw performance (Ponytail standard) and avoid reflection overhead, the generic helpers do not dynamically allocate pointer types. Developers **MUST** use value types (e.g., `cachekit.Get[User]`). Passing a pointer type (e.g., `cachekit.Get[*User]`) is unsupported and will fail under strict codecs.
 ## Architecture
 
 - `RedisCache` embeds `core.Lifecycle` for robust start/stop handling, and implements `HealthCheckProvider`. Health checks are delegated to `healthkit.StandardChecks`. Connection retry uses `core/retry.Do`.
