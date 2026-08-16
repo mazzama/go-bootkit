@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +16,7 @@ import (
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
+
 
 // Default HTTP server timeouts. These guard against slow clients and leaked
 // keepalive connections exhausting the server under load.
@@ -167,11 +169,13 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 		Level:         slog.LevelInfo,
 		RecoverPanics: true,
 		Schema:        httplog.SchemaECS,
+		Skip: func(req *http.Request, respStatus int) bool {
+			return strings.HasPrefix(req.URL.Path, "/health")
+		},
 	}))
 
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
-	router.Use(middleware.Recoverer)
 
 	// User-supplied middleware injected here
 	for _, mw := range options.Middlewares {
@@ -182,6 +186,18 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 
 	// Setup health routes if aggregator is provided
 	MountHealthRoutes(router, health)
+
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"Resource not found"}}`))
+	})
+
+	router.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write([]byte(`{"error":{"code":"METHOD_NOT_ALLOWED","message":"Method not allowed"}}`))
+	})
 
 	return router
 }

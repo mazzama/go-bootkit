@@ -208,9 +208,70 @@ func TestNewDefaultRouter(t *testing.T) {
 		t.Errorf("expected 200 OK from health endpoint, got %d", rec.Code)
 	}
 
-	// Verify the injected logger was used by httplog middleware
-	if !strings.Contains(buf.String(), "/health/liveness") {
-		t.Errorf("expected injected logger to capture the request, got: %s", buf.String())
+	// Verify health routes are skipped by the logger
+	if buf.Len() > 0 {
+		t.Errorf("expected health probes to not be logged, got: %s", buf.String())
+	}
+
+	// Verify normal routes ARE logged
+	handler.Get("/test-route", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req = httptest.NewRequest(http.MethodGet, "/test-route", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !strings.Contains(buf.String(), "/test-route") {
+		t.Errorf("expected injected logger to capture normal requests, got: %s", buf.String())
+	}
+}
+
+func TestDefaultRouter_NotFound(t *testing.T) {
+	handler := NewDefaultRouter(nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 Not Found, got %d", rec.Code)
+	}
+
+	expectedType := "application/json"
+	if got := rec.Header().Get("Content-Type"); got != expectedType {
+		t.Errorf("expected Content-Type %q, got %q", expectedType, got)
+	}
+
+	expectedBody := `{"error":{"code":"NOT_FOUND","message":"Resource not found"}}`
+	if strings.TrimSpace(rec.Body.String()) != expectedBody {
+		t.Errorf("expected body %q, got %q", expectedBody, rec.Body.String())
+	}
+}
+
+func TestDefaultRouter_MethodNotAllowed(t *testing.T) {
+	handler := NewDefaultRouter(nil, nil)
+	
+	// Mount a GET route
+	handler.Get("/test", func(w http.ResponseWriter, r *http.Request) {})
+
+	// Request it with POST
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 Method Not Allowed, got %d", rec.Code)
+	}
+
+	expectedType := "application/json"
+	if got := rec.Header().Get("Content-Type"); got != expectedType {
+		t.Errorf("expected Content-Type %q, got %q", expectedType, got)
+	}
+
+	expectedBody := `{"error":{"code":"METHOD_NOT_ALLOWED","message":"Method not allowed"}}`
+	if strings.TrimSpace(rec.Body.String()) != expectedBody {
+		t.Errorf("expected body %q, got %q", expectedBody, rec.Body.String())
 	}
 }
 
