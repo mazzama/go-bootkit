@@ -48,6 +48,8 @@ github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHk
 github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
 github.com/go-chi/chi/v5 v5.2.3 h1:WQIt9uxdsAbgIYgid+BpYc+liqQZGMHRaUwp0JUcvdE=
 github.com/go-chi/chi/v5 v5.2.3/go.mod h1:L2yAIGWB3H+phAw1NxKwWM+7eUH/lU8pOMm5hHcoops=
+github.com/go-chi/chi/v5 v5.3.1 h1:3j4HZLGZQ3JpMCrPJF/Jl3mYJfWLKBfNJ6quurUGCf8=
+github.com/go-chi/chi/v5 v5.3.1/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
 github.com/go-chi/httplog/v3 v3.2.2 h1:G0oYv3YYcikNjijArHFUlqfR78cQNh9fGT43i6StqVc=
 github.com/go-chi/httplog/v3 v3.2.2/go.mod h1:N/J1l5l1fozUrqIVuT8Z/HzNeSy8TF2EFyokPLe6y2w=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
@@ -88,6 +90,7 @@ github.com/mattn/go-isatty v0.0.21 h1:xYae+lCNBP7QuW4PUnNG61ffM4hVIfm+zUzDuSzYLG
 github.com/mattn/go-isatty v0.0.21/go.mod h1:ZXfXG4SQHsB/w3ZeOYbR0PrPwLy+n6xiMrJlRFqopa4=
 github.com/mazzama/go-bootkit/core v0.1.3 h1:H7DHbKKc1yAgxgzjaTGQoeNeVBFWg/EFy7zNx32YhmM=
 github.com/mazzama/go-bootkit/core v0.1.3/go.mod h1:4W2+ukShx+AxyHHN5J++eLAG2OAIT3a2cAguD3JIXn4=
+github.com/mazzama/go-bootkit/core v0.2.0/go.mod h1:BA51zMt4iuFN5c3jEBCPOcTZrJjsMRW3XS23YldZHAQ=
 github.com/mazzama/go-bootkit/databasekit v0.1.2 h1:xq2i4j2JnMG4N2I1Rp8kgWWkI2Tl5rdLXje79yCKChg=
 github.com/mazzama/go-bootkit/databasekit v0.1.2/go.mod h1:l76xFvMsEYg7uy2kaCOenifZzkPbF1go52grFGerjuM=
 github.com/mazzama/go-bootkit/serverkit v0.1.3 h1:X40joKcWnS5UhnoaZ1wyQBYo4hO4YPEd4vBwNqd/Brk=

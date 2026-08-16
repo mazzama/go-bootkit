@@ -3,10 +3,10 @@ module github.com/mazzama/go-bootkit/examples/orders
 go 1.26.5
 
 require (
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/mazzama/go-bootkit/cachekit v0.1.4
-	github.com/mazzama/go-bootkit/core v0.1.3
+	github.com/mazzama/go-bootkit/core v0.2.0
 	github.com/mazzama/go-bootkit/databasekit v0.1.2
 	github.com/mazzama/go-bootkit/serverkit v0.1.3
 	github.com/mazzama/go-bootkit/workerkit v0.0.0-00010101000000-000000000000
