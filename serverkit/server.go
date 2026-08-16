@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -167,11 +168,13 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 		Level:         slog.LevelInfo,
 		RecoverPanics: true,
 		Schema:        httplog.SchemaECS,
+		Skip: func(req *http.Request, respStatus int) bool {
+			return strings.HasPrefix(req.URL.Path, "/health") && respStatus < 500
+		},
 	}))
 
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
-	router.Use(middleware.Recoverer)
 
 	// User-supplied middleware injected here
 	for _, mw := range options.Middlewares {
@@ -183,7 +186,22 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 	// Setup health routes if aggregator is provided
 	MountHealthRoutes(router, health)
 
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusNotFound, "NOT_FOUND", "Resource not found")
+	})
+
+	router.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
+	})
+
 	return router
+}
+
+func writeJSONError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	payload := fmt.Sprintf(`{"error":{"code":"%s","message":"%s"}}`, code, message)
+	_, _ = w.Write([]byte(payload))
 }
 
 func WithLogger(logger *slog.Logger) HTTPServerOption {

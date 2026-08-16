@@ -3,6 +3,7 @@ package serverkit
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -208,9 +209,60 @@ func TestNewDefaultRouter(t *testing.T) {
 		t.Errorf("expected 200 OK from health endpoint, got %d", rec.Code)
 	}
 
-	// Verify the injected logger was used by httplog middleware
-	if !strings.Contains(buf.String(), "/health/liveness") {
-		t.Errorf("expected injected logger to capture the request, got: %s", buf.String())
+	// Verify health routes are skipped by the logger
+	if buf.Len() > 0 {
+		t.Errorf("expected health probes to not be logged, got: %s", buf.String())
+	}
+
+	// Verify normal routes ARE logged
+	handler.Get("/test-route", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req = httptest.NewRequest(http.MethodGet, "/test-route", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !strings.Contains(buf.String(), "/test-route") {
+		t.Errorf("expected injected logger to capture normal requests, got: %s", buf.String())
+	}
+}
+
+func TestDefaultRouter_NotFound(t *testing.T) {
+	handler := NewDefaultRouter(nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assertJSONError(t, rec, http.StatusNotFound, "NOT_FOUND", "Resource not found")
+}
+
+func TestDefaultRouter_MethodNotAllowed(t *testing.T) {
+	handler := NewDefaultRouter(nil, nil)
+
+	// Mount a GET route
+	handler.Get("/test", func(w http.ResponseWriter, r *http.Request) {})
+
+	// Request it with POST
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assertJSONError(t, rec, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
+}
+
+func assertJSONError(t *testing.T, rec *httptest.ResponseRecorder, expectedStatus int, code, msg string) {
+	t.Helper()
+	if rec.Code != expectedStatus {
+		t.Errorf("expected status %d, got %d", expectedStatus, rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", got)
+	}
+	expectedBody := fmt.Sprintf(`{"error":{"code":"%s","message":"%s"}}`, code, msg)
+	if strings.TrimSpace(rec.Body.String()) != expectedBody {
+		t.Errorf("expected body %q, got %q", expectedBody, rec.Body.String())
 	}
 }
 
