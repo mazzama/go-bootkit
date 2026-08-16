@@ -49,7 +49,7 @@ func (strictCodec) Marshal(v any) ([]byte, error) {
 func (strictCodec) Unmarshal(data []byte, v any) error {
 	// v is always a pointer because we pass &zero.
 	// If the inner type (zero) is ALSO a pointer, we reject it.
-	if reflect.TypeOf(v).Elem().Kind() == reflect.Ptr {
+	if reflect.TypeOf(v).Elem().Kind() == reflect.Pointer {
 		return errors.New("strictCodec: pointer to pointer not allowed")
 	}
 	return json.Unmarshal(data, v)
