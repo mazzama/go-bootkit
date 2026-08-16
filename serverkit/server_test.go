@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
@@ -372,4 +373,76 @@ func TestWithRouterTimeout(t *testing.T) {
 	if opts.Timeout != 5*time.Second {
 		t.Errorf("expected 5s timeout, got %v", opts.Timeout)
 	}
+}
+
+// TestDefaultRouter_RejectsSpoofedForwardedHeaders guards the security fix
+// for GHSA-9g5q-2w5x-hmxf / GHSA-3fxj-6jh8-hvhx / GHSA-rjr7-jggh-pgcp:
+// without trusted proxies configured, the router must NOT resolve the client
+// IP from client-supplied forwarding headers, and must never mutate
+// r.RemoteAddr. The deprecated middleware.RealIP trusted the leftmost
+// X-Forwarded-For value, letting an attacker spoof any IP.
+func TestDefaultRouter_RejectsSpoofedForwardedHeaders(t *testing.T) {
+	handler := NewDefaultRouter(nil, nil)
+
+	var gotIP string
+	handler.Get("/whoami", func(w http.ResponseWriter, r *http.Request) {
+		gotIP = middleware.GetClientIP(r.Context())
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
+	req.RemoteAddr = "192.0.2.10:54321" // true TCP peer
+	req.Header.Set("X-Forwarded-For", "203.0.113.66, 198.51.100.7")
+	req.Header.Set("X-Real-IP", "203.0.113.66")
+	req.Header.Set("True-Client-IP", "203.0.113.66")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := req.RemoteAddr; got != "192.0.2.10:54321" {
+		t.Fatalf("RemoteAddr mutated by spoofed forwarding headers: got %q, want %q", got, "192.0.2.10:54321")
+	}
+
+	if gotIP != "192.0.2.10" {
+		t.Errorf("GetClientIP = %q, want the TCP peer %q", gotIP, "192.0.2.10")
+	}
+}
+
+// TestDefaultRouter_WithTrustedProxies verifies that when trusted proxy
+// CIDRs are configured, the client IP is resolved from X-Forwarded-For by
+// walking right-to-left and skipping trusted hops, while RemoteAddr stays
+// the TCP peer (the proxy).
+func TestDefaultRouter_WithTrustedProxies(t *testing.T) {
+	handler := NewDefaultRouter(nil, nil, WithTrustedProxies("10.0.0.0/8"))
+
+	var gotIP string
+	handler.Get("/whoami", func(w http.ResponseWriter, r *http.Request) {
+		gotIP = middleware.GetClientIP(r.Context())
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
+	req.RemoteAddr = "10.1.2.3:443" // trusted proxy (Caddy)
+	req.Header.Set("X-Forwarded-For", "203.0.113.66, 10.1.2.3")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := req.RemoteAddr; got != "10.1.2.3:443" {
+		t.Fatalf("RemoteAddr mutated: got %q, want %q", got, "10.1.2.3:443")
+	}
+
+	if gotIP != "203.0.113.66" {
+		t.Errorf("GetClientIP = %q, want the untrusted client %q", gotIP, "203.0.113.66")
+	}
+}
+
+// TestWithTrustedProxies_InvalidCIDRFailsFast ensures a malformed CIDR
+// cannot silently disable trust and fall back to accepting spoofed headers.
+func TestWithTrustedProxies_InvalidCIDRFailsFast(t *testing.T) {
+	opts := &RouterOptions{}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for invalid trusted proxy CIDR, got none")
+		}
+	}()
+	WithTrustedProxies("not-a-cidr")(opts)
 }

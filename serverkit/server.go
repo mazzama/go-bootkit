@@ -116,8 +116,14 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 }
 
 type RouterOptions struct {
-	Timeout     time.Duration
-	Middlewares []func(http.Handler) http.Handler
+	Timeout time.Duration
+	// TrustedProxies are CIDR prefixes of reverse proxies in front of this
+	// server. When set, the router resolves the client IP from
+	// X-Forwarded-For (right-to-left, skipping trusted hops). When empty,
+	// the router falls back to the TCP peer address — safe by default:
+	// client-supplied forwarding headers are never trusted.
+	TrustedProxies []string
+	Middlewares    []func(http.Handler) http.Handler
 }
 
 type RouterOption func(*RouterOptions)
@@ -135,6 +141,26 @@ func WithRouterTimeout(d time.Duration) RouterOption {
 func WithMiddleware(middlewares ...func(http.Handler) http.Handler) RouterOption {
 	return func(o *RouterOptions) {
 		o.Middlewares = append(o.Middlewares, middlewares...)
+	}
+}
+
+// WithTrustedProxies sets the CIDR prefixes of reverse proxies in front of
+// this server. The client IP is then resolved from the X-Forwarded-For
+// header, walking right-to-left and skipping trusted hops (secure against
+// spoofed headers). When not set, the router trusts only the TCP peer
+// address and ignores forwarding headers entirely.
+//
+// Invalid CIDRs fail fast at option-application time so a misconfigured
+// proxy list can never silently degrade to trusting attacker-supplied
+// headers.
+func WithTrustedProxies(prefixes ...string) RouterOption {
+	return func(o *RouterOptions) {
+		for _, p := range prefixes {
+			if _, _, err := net.ParseCIDR(p); err != nil {
+				panic(fmt.Sprintf("serverkit: invalid trusted proxy CIDR %q: %v", p, err))
+			}
+		}
+		o.TrustedProxies = append(o.TrustedProxies, prefixes...)
 	}
 }
 
@@ -174,7 +200,18 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 	}))
 
 	router.Use(middleware.RequestID)
-	router.Use(middleware.RealIP)
+	// Resolve the client IP without trusting client-supplied forwarding
+	// headers (GHSA-9g5q-2w5x-hmxf, GHSA-3fxj-6jh8-hvhx,
+	// GHSA-rjr7-jggh-pgcp — the deprecated middleware.RealIP is vulnerable
+	// to spoofing). Trusted proxies are enumerated via WithTrustedProxies;
+	// with none configured, the TCP peer address is used and no header is
+	// ever trusted. The resolved IP is available to handlers via
+	// middleware.GetClientIP(r.Context()); r.RemoteAddr is never mutated.
+	if len(options.TrustedProxies) > 0 {
+		router.Use(middleware.ClientIPFromXFF(options.TrustedProxies...))
+	} else {
+		router.Use(middleware.ClientIPFromRemoteAddr)
+	}
 
 	// User-supplied middleware injected here
 	for _, mw := range options.Middlewares {
