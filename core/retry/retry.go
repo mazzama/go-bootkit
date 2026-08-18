@@ -5,8 +5,9 @@ package retry
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
-	"math/rand/v2"
+	"math/big"
 	"time"
 )
 
@@ -41,7 +42,10 @@ func Do(ctx context.Context, maxAttempts int, baseBackoff time.Duration, fn func
 		backoff := baseBackoff * time.Duration(1<<attempt)
 		jitter := time.Duration(0)
 		if half := int64(baseBackoff / 2); half > 0 {
-			jitter = time.Duration(rand.Int64N(half))
+			n, randErr := rand.Int(rand.Reader, big.NewInt(half))
+			if randErr == nil {
+				jitter = time.Duration(n.Int64())
+			}
 		}
 
 		timer := time.NewTimer(backoff + jitter)

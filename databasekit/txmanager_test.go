@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/mazzama/go-bootkit/core"
-	"github.com/mazzama/go-bootkit/databasekit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	"github.com/mazzama/go-bootkit/core"
+	"github.com/mazzama/go-bootkit/databasekit"
 )
 
 type MockProvider struct {
@@ -19,11 +20,15 @@ type MockReadyProvider struct {
 	readyChan chan struct{}
 }
 
-func (m *MockReadyProvider) Ready() <-chan struct{} {
-	return m.readyChan
+type MockTx struct {
+	mock.Mock
 }
 
 var _ core.Readyable = (*MockReadyProvider)(nil)
+
+func (m *MockReadyProvider) Ready() <-chan struct{} {
+	return m.readyChan
+}
 
 func (m *MockProvider) Begin(ctx context.Context) (databasekit.Tx, error) {
 	args := m.Called(ctx)
@@ -55,10 +60,6 @@ func (m *MockProvider) QueryRow(ctx context.Context, sql string, arguments ...an
 		return nil
 	}
 	return args.Get(0).(databasekit.Row)
-}
-
-type MockTx struct {
-	mock.Mock
 }
 
 func (m *MockTx) Begin(ctx context.Context) (databasekit.Tx, error) {
@@ -187,8 +188,8 @@ func TestTxManager(t *testing.T) {
 			return tm.WithTx(ctxTx1, func(ctxTx2 context.Context) error {
 				q2 := tm.QuerierFromContext(ctxTx2)
 				assert.Equal(t, mockTxInner, q2)
-				_, err := q2.Exec(ctxTx2, "INSERT INTO items (name) VALUES ('item4')")
-				return err
+				_, execErr := q2.Exec(ctxTx2, "INSERT INTO items (name) VALUES ('item4')")
+				return execErr
 			})
 		})
 
@@ -224,8 +225,8 @@ func TestTxManager(t *testing.T) {
 
 			innerErr := tm.WithTx(ctxTx1, func(ctxTx2 context.Context) error {
 				q2 := tm.QuerierFromContext(ctxTx2)
-				_, err := q2.Exec(ctxTx2, "INSERT INTO items (name) VALUES ('item6')")
-				assert.NoError(t, err)
+				_, execErr := q2.Exec(ctxTx2, "INSERT INTO items (name) VALUES ('item6')")
+				assert.NoError(t, execErr)
 				return expectedErr
 			})
 			assert.EqualError(t, innerErr, expectedErr.Error())
@@ -251,8 +252,11 @@ func TestTxManager(t *testing.T) {
 		_, err := q.Exec(ctx, "SELECT 1")
 		assert.NoError(t, err)
 
-		_, err = q.Query(ctx, "SELECT 1")
+		rows, err := q.Query(ctx, "SELECT 1")
 		assert.NoError(t, err)
+		if rows != nil {
+			rows.Close()
+		}
 
 		row := q.QueryRow(ctx, "SELECT 1")
 		assert.Nil(t, row)
@@ -272,8 +276,11 @@ func TestTxManager(t *testing.T) {
 		_, err := q.Exec(ctxTimeout, "SELECT 1")
 		assert.Error(t, err)
 
-		_, err = q.Query(ctxTimeout, "SELECT 1")
+		rows, err := q.Query(ctxTimeout, "SELECT 1")
 		assert.Error(t, err)
+		if rows != nil {
+			rows.Close()
+		}
 
 		err = tm.WithTx(ctxTimeout, func(ctx context.Context) error {
 			return nil
@@ -292,8 +299,11 @@ func TestTxManager(t *testing.T) {
 		_, err := q.Exec(ctx, "SELECT 1")
 		assert.NoError(t, err)
 
-		_, err = q.Query(ctx, "SELECT 1")
+		rows, err := q.Query(ctx, "SELECT 1")
 		assert.NoError(t, err)
+		if rows != nil {
+			rows.Close()
+		}
 
 		row := q.QueryRow(ctx, "SELECT 1")
 		assert.Nil(t, row)

@@ -8,15 +8,6 @@ import (
 	"github.com/mazzama/go-bootkit/core"
 )
 
-// ErrNoRows is the framework-native no-rows sentinel. It is the only error a
-// repository must recognize by identity when a single-row query returns nothing.
-// The pgx adapter rewrites pgx.ErrNoRows to it, so repositories never import pgx.
-var ErrNoRows = errors.New("databasekit: no rows in result set")
-
-// ErrTxClosed marks an operation on a committed or rolled-back transaction.
-// The pgx adapter rewrites pgx.ErrTxClosed to it, so WithTx never names pgx.
-var ErrTxClosed = errors.New("databasekit: transaction is closed")
-
 // Row is the result of a single-row query. The error is deferred: everything —
 // readiness-gate failure, no rows, driver error — surfaces at Scan. It never
 // returns nil and never returns an error at call time. Scan is callable exactly
@@ -70,15 +61,31 @@ type txKey struct{}
 // failures and nil-pool guards through the deferred QueryRow contract.
 type errRow struct{ err error }
 
-func (e errRow) Scan(dest ...any) error {
-	return e.err
-}
-
 // readyQuerier gates a TxProvider on readiness before delegating, so a query
 // issued before the pool connects blocks up to ctx's deadline rather than
 // racing the connection.
 type readyQuerier struct {
 	provider TxProvider
+}
+
+// TxManager hands out a Querier from context (the active Tx, or the provider
+// itself when no transaction is in flight) and runs transactional work via
+// WithTx.
+type TxManager struct {
+	provider TxProvider
+}
+
+// ErrNoRows is the framework-native no-rows sentinel. It is the only error a
+// repository must recognize by identity when a single-row query returns nothing.
+// The pgx adapter rewrites pgx.ErrNoRows to it, so repositories never import pgx.
+var ErrNoRows = errors.New("databasekit: no rows in result set")
+
+// ErrTxClosed marks an operation on a committed or rolled-back transaction.
+// The pgx adapter rewrites pgx.ErrTxClosed to it, so WithTx never names pgx.
+var ErrTxClosed = errors.New("databasekit: transaction is closed")
+
+func (e errRow) Scan(dest ...any) error {
+	return e.err
 }
 
 func (r readyQuerier) wait(ctx context.Context) error {
@@ -111,10 +118,7 @@ func (r readyQuerier) QueryRow(ctx context.Context, sql string, args ...any) Row
 	return r.provider.QueryRow(ctx, sql, args...)
 }
 
-type TxManager struct {
-	provider TxProvider
-}
-
+// NewTxManager creates a TxManager over the given provider.
 func NewTxManager(provider TxProvider) *TxManager {
 	return &TxManager{provider: provider}
 }
@@ -152,8 +156,8 @@ func (tm *TxManager) WithTx(ctx context.Context, fn func(ctx context.Context) er
 		}
 	} else {
 		if rd, ok := tm.provider.(core.Readyable); ok {
-			if err := core.WaitReady(ctx, rd.Ready()); err != nil {
-				return fmt.Errorf("pool not ready: %w", err)
+			if waitErr := core.WaitReady(ctx, rd.Ready()); waitErr != nil {
+				return fmt.Errorf("pool not ready: %w", waitErr)
 			}
 		}
 		tx, err = tm.provider.Begin(ctx)
@@ -170,15 +174,15 @@ func (tm *TxManager) WithTx(ctx context.Context, fn func(ctx context.Context) er
 
 	ctxWithTx := context.WithValue(ctx, txKey{}, tx)
 
-	if err := fn(ctxWithTx); err != nil {
+	if fnErr := fn(ctxWithTx); fnErr != nil {
 		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, ErrTxClosed) {
-			return fmt.Errorf("transaction failed: %v, rollback failed: %v", err, rollbackErr)
+			return fmt.Errorf("transaction failed: %w, rollback failed: %w", fnErr, rollbackErr)
 		}
-		return err
+		return fnErr
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return fmt.Errorf("failed to commit transaction: %w", commitErr)
 	}
 
 	return nil

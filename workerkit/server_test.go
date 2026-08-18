@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 
@@ -42,9 +43,8 @@ func TestAsynqServer_Lifecycle(t *testing.T) {
 		t.Fatal("server did not become ready")
 	}
 
-	err = server.Stop(ctx)
-	if err != nil {
-		t.Errorf("Stop failed: %v", err)
+	if stopErr := server.Stop(ctx); stopErr != nil {
+		t.Errorf("Stop failed: %v", stopErr)
 	}
 }
 
@@ -93,8 +93,8 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 	}
 
 	task := workerkit.Task{Type: "notification:send", Payload: []byte(`{"to":"user@example.com"}`)}
-	if _, err := client.Enqueue(task); err != nil {
-		t.Fatalf("Enqueue failed: %v", err)
+	if _, enqErr := client.Enqueue(task); enqErr != nil {
+		t.Fatalf("Enqueue failed: %v", enqErr)
 	}
 
 	handlerTimer := time.NewTimer(5 * time.Second)
@@ -111,22 +111,22 @@ func TestAsynqServer_HandleFunc_ProcessesTask(t *testing.T) {
 		t.Fatal("handler did not receive task within timeout")
 	}
 
-	if err := client.Stop(ctx); err != nil {
-		t.Errorf("client Stop failed: %v", err)
+	if stopErr := client.Stop(ctx); stopErr != nil {
+		t.Errorf("client Stop failed: %v", stopErr)
 	}
-	if err := server.Stop(ctx); err != nil {
-		t.Errorf("server Stop failed: %v", err)
+	if stopErr := server.Stop(ctx); stopErr != nil {
+		t.Errorf("server Stop failed: %v", stopErr)
 	}
 
 	// Start returns ctx.Err() once the context is cancelled; drain both
 	// goroutines so they don't outlive the test.
 	cancel()
 	waitErr := func(ch <-chan error, name string) {
-		timer := time.NewTimer(time.Second)
-		defer timer.Stop()
+		waitTimer := time.NewTimer(time.Second)
+		defer waitTimer.Stop()
 		select {
 		case <-ch:
-		case <-timer.C:
+		case <-waitTimer.C:
 			t.Errorf("%s did not return after cancel", name)
 		}
 	}

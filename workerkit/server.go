@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
+
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
+// AsynqServer is a lifecycle-managed asynq worker server.
 type AsynqServer struct {
 	core.Lifecycle
 	name   string
@@ -19,6 +21,9 @@ type AsynqServer struct {
 	logger *slog.Logger
 }
 
+var _ core.Component = (*AsynqServer)(nil)
+
+// NewAsynqServer creates an AsynqServer from a Redis config and server config.
 func NewAsynqServer(name string, redisCfg RedisConfig, cfg ServerConfig) *AsynqServer {
 	server := asynq.NewServer(redisCfg.toAsynqOpt(), cfg.toAsynqConfig())
 	mux := asynq.NewServeMux()
@@ -77,6 +82,7 @@ func (sc ServerConfig) toAsynqConfig() asynq.Config {
 	return cfg
 }
 
+// Mux returns the internal asynq serve mux used for handler registration.
 func (s *AsynqServer) Mux() *asynq.ServeMux {
 	return s.mux
 }
@@ -90,12 +96,12 @@ func (s *AsynqServer) HandleFunc(pattern string, handler Handler) {
 	})
 }
 
+// Name returns the component name of the server.
 func (s *AsynqServer) Name() string {
 	return s.name
 }
 
+// HealthChecks returns the liveness/readiness checks for the server.
 func (s *AsynqServer) HealthChecks() []healthkit.Check {
 	return asynqHealthChecks(s.name, s.Ready())
 }
-
-var _ core.Component = (*AsynqServer)(nil)

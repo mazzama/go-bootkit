@@ -115,7 +115,7 @@ func TestNewAggregatorNegativeEvaluatesLive(t *testing.T) {
 	handler := agg.Handler(Liveness)
 	for range 3 {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 		handler.ServeHTTP(rec, req)
 	}
 
@@ -168,7 +168,7 @@ func TestHandlerReturns200WhenAllChecksPass(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	agg.Handler(Liveness).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -188,7 +188,7 @@ func TestHandlerReturns503WhenCheckFails(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readyz", http.NoBody)
 	agg.Handler(Readiness).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
@@ -205,7 +205,7 @@ func TestHandlerNoChecksReturns200(t *testing.T) {
 	agg := NewAggregator(0)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/startupz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/startupz", http.NoBody)
 	agg.Handler(Startup).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -232,12 +232,12 @@ func TestEvaluateCachesResults(t *testing.T) {
 
 	// First call — should invoke Fn.
 	rec1 := httptest.NewRecorder()
-	req1 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec1, req1)
 
 	// Second call within the cache TTL — should NOT invoke Fn again.
 	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec2, req2)
 
 	count := atomic.LoadInt32(&callCount)
@@ -262,7 +262,7 @@ func TestEvaluateMultipleChecksConcurrent(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	agg.Handler(Liveness).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
@@ -287,7 +287,7 @@ func TestRegisterMultipleKinds(t *testing.T) {
 
 	// Liveness should pass.
 	recLive := httptest.NewRecorder()
-	reqLive := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	reqLive := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	agg.Handler(Liveness).ServeHTTP(recLive, reqLive)
 	if recLive.Code != http.StatusOK {
 		t.Fatalf("liveness: expected 200, got %d", recLive.Code)
@@ -295,7 +295,7 @@ func TestRegisterMultipleKinds(t *testing.T) {
 
 	// Readiness should fail.
 	recReady := httptest.NewRecorder()
-	reqReady := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	reqReady := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readyz", http.NoBody)
 	agg.Handler(Readiness).ServeHTTP(recReady, reqReady)
 	if recReady.Code != http.StatusServiceUnavailable {
 		t.Fatalf("readiness: expected 503, got %d", recReady.Code)
@@ -318,7 +318,7 @@ func TestCacheExpiresAfterTTL(t *testing.T) {
 
 	// First call — invokes Fn.
 	rec1 := httptest.NewRecorder()
-	req1 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec1, req1)
 
 	// Wait for the cache to expire.
@@ -326,7 +326,7 @@ func TestCacheExpiresAfterTTL(t *testing.T) {
 
 	// Second call — cache expired, should invoke Fn again.
 	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec2, req2)
 
 	count := atomic.LoadInt32(&callCount)
@@ -352,7 +352,7 @@ func TestSlowCheckCancelledByTimeout(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	agg.Handler(Liveness).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
@@ -392,7 +392,7 @@ func TestCacheRecovery(t *testing.T) {
 
 	// 1. Initial check - fails
 	rec1 := httptest.NewRecorder()
-	req1 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec1, req1)
 	if rec1.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503, got %d", rec1.Code)
@@ -403,7 +403,7 @@ func TestCacheRecovery(t *testing.T) {
 
 	// 3. Check within TTL - should still return cached 503
 	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected cached status 503 within TTL, got %d", rec2.Code)
@@ -414,7 +414,7 @@ func TestCacheRecovery(t *testing.T) {
 
 	// 5. Check after TTL - should run again, succeed, and return 200 OK
 	rec3 := httptest.NewRecorder()
-	req3 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req3 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK {
 		t.Fatalf("expected status 200 after recovery and TTL expiry, got %d", rec3.Code)
@@ -422,7 +422,7 @@ func TestCacheRecovery(t *testing.T) {
 
 	// 6. Check again within TTL - should return cached 200 OK
 	rec4 := httptest.NewRecorder()
-	req4 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req4 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	handler.ServeHTTP(rec4, req4)
 	if rec4.Code != http.StatusOK {
 		t.Fatalf("expected cached status 200 within TTL, got %d", rec4.Code)

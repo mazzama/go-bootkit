@@ -98,6 +98,7 @@ func TestWithConnectRetry(t *testing.T) {
 		t.Errorf("expected 2s backoff, got %v", db.retryBackoff)
 	}
 }
+
 func TestWithLogger(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db := &PostgresDB{}
@@ -121,9 +122,12 @@ func TestPostgresDBTxProviderWhenPoolNil(t *testing.T) {
 		t.Errorf("Exec unexpected error: %v", err)
 	}
 
-	_, err = tp.Query(ctx, "SELECT 1")
+	rows, err := tp.Query(ctx, "SELECT 1")
 	if err == nil || err.Error() != "database pool is not initialized" {
 		t.Errorf("Query unexpected error: %v", err)
+	}
+	if rows != nil {
+		rows.Close()
 	}
 
 	var dummy int
@@ -152,6 +156,7 @@ func TestPostgresDBConnectRetryFailure(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
 func TestPostgresDBConnectRetrySmallBackoff(t *testing.T) {
 	db, err := NewPostgresDB("postgres://invalid:5432/db?sslmode=disable", WithConnectRetry(2, 1*time.Nanosecond))
 	if err != nil {

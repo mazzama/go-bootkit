@@ -6,6 +6,8 @@ import (
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
+// Component is a lifecycle-managed unit of the application: it reports its
+// name and can be started and stopped.
 type Component interface {
 	Name() string
 	Start(ctx context.Context) error
@@ -19,6 +21,8 @@ type Readyable interface {
 	Ready() <-chan struct{}
 }
 
+// HealthCheckProvider exposes the health checks a component contributes to
+// the health aggregator.
 type HealthCheckProvider interface {
 	HealthChecks() []healthkit.Check
 }

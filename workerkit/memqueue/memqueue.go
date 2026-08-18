@@ -13,8 +13,6 @@ import (
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 
-var _ workerkit.Enqueuer = (*InMemoryClient)(nil)
-
 // EnqueuedTask is a task as it was enqueued, with metadata captured at enqueue time.
 type EnqueuedTask struct {
 	Task       workerkit.Task
@@ -29,6 +27,8 @@ type InMemoryClient struct {
 	mu    sync.Mutex
 	tasks []EnqueuedTask
 }
+
+var _ workerkit.Enqueuer = (*InMemoryClient)(nil)
 
 // New creates a ready-to-use InMemoryClient.
 func New() *InMemoryClient {
@@ -57,7 +57,7 @@ func (c *InMemoryClient) Enqueue(task workerkit.Task, opts ...workerkit.EnqueueO
 	for _, fn := range opts {
 		fn(&options)
 	}
-	return c.enqueue(task, options), nil
+	return c.enqueue(task, &options), nil
 }
 
 // EnqueueContext stores the task and returns a synthetic TaskInfo.
@@ -71,16 +71,16 @@ func (c *InMemoryClient) EnqueueContext(ctx context.Context, task workerkit.Task
 	for _, fn := range opts {
 		fn(&options)
 	}
-	return c.enqueue(task, options), nil
+	return c.enqueue(task, &options), nil
 }
 
-func (c *InMemoryClient) enqueue(task workerkit.Task, opts workerkit.EnqueueOptions) *workerkit.TaskInfo {
+func (c *InMemoryClient) enqueue(task workerkit.Task, opts *workerkit.EnqueueOptions) *workerkit.TaskInfo {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.tasks = append(c.tasks, EnqueuedTask{
 		Task:       task,
-		Options:    opts,
+		Options:    *opts,
 		EnqueuedAt: time.Now(),
 	})
 

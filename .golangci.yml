@@ -2,25 +2,92 @@ version: "2"
 
 run:
   timeout: 5m
-  modules-download-mode: readonly
+  tests: true               # Memastikan linter juga mengecek file _test.go
+  issues-exit-code: 1       # Jika ada error, CI/CD akan gagal (exit code 1)
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/mazzama/go-bootkit)
+    gofumpt:
+      extra-rules: true
 
 linters:
+  default: none
   enable:
     - govet
     - staticcheck
     - errcheck
-    - ineffassign
-    - unused
-    - bodyclose
-    - gocritic
+    - errorlint
     - nilerr
-    - makezero
+    - bodyclose
+    - sqlclosecheck
+    - copyloopvar
+    - contextcheck
+    - noctx
+
+    - unused
+    - ineffassign
     - unconvert
-    - nolintlint
+    - unparam
+    - prealloc
 
-formatters:
-  enable:
-    - goimports
-    - gofmt
+    - gosec
+    - funlen
+    - cyclop
+    - dupl
 
+    - gocritic
+    - revive
+    - misspell
+    - decorder
 
+  exclusions:
+    rules:
+      - path: .*_test\.go
+        linters:
+          - funlen
+          - dupl
+          - gosec
+          - errcheck
+          - bodyclose
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+      settings:
+        shadow:
+          strict: true
+    revive:
+      rules:
+        - name: exported
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    funlen:
+      lines: 80
+      statements: 50
+    cyclop:
+      max-complexity: 15
+    decorder:
+      dec-order:
+        - type
+        - const
+        - var
+        - func
+      disable-dec-order-check: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

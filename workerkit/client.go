@@ -5,16 +5,25 @@ import (
 	"fmt"
 
 	"github.com/hibiken/asynq"
+
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
+// AsynqClient is a lifecycle-managed asynq client for enqueueing tasks.
 type AsynqClient struct {
 	core.Lifecycle
 	name   string
 	client *asynq.Client
 }
 
+var _ core.Readyable = (*AsynqClient)(nil)
+var (
+	_ core.Component = (*AsynqClient)(nil)
+	_ Enqueuer       = (*AsynqClient)(nil)
+)
+
+// NewAsynqClient creates an AsynqClient backed by the given Redis config.
 func NewAsynqClient(name string, redisCfg RedisConfig) *AsynqClient {
 	client := asynq.NewClient(redisCfg.toAsynqOpt())
 
@@ -70,10 +79,12 @@ func (c *AsynqClient) EnqueueContext(ctx context.Context, task Task, opts ...Enq
 	return fromAsynqInfo(info), nil
 }
 
+// Name returns the component name of the client.
 func (c *AsynqClient) Name() string {
 	return c.name
 }
 
+// HealthChecks returns the liveness/readiness checks for the client.
 func (c *AsynqClient) HealthChecks() []healthkit.Check {
 	return asynqHealthChecks(c.name, c.Ready())
 }
@@ -128,8 +139,3 @@ func fromAsynqInfo(info *asynq.TaskInfo) *TaskInfo {
 		LastFailedAt:  info.LastFailedAt,
 	}
 }
-
-var _ core.Readyable = (*AsynqClient)(nil)
-
-var _ core.Component = (*AsynqClient)(nil)
-var _ Enqueuer = (*AsynqClient)(nil)

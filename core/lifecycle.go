@@ -23,6 +23,8 @@ type Lifecycle struct {
 	stopped   bool
 }
 
+var _ Readyable = (*Lifecycle)(nil)
+
 // NewLifecycle creates a new Lifecycle with the provided connect function.
 // It is returned as a value to be easily embedded in other structs.
 func NewLifecycle(connect func(ctx context.Context) (func(context.Context) error, error)) Lifecycle {
@@ -110,5 +112,3 @@ func (l *Lifecycle) Ready() <-chan struct{} {
 	l.initReady()
 	return l.ready
 }
-
-var _ Readyable = (*Lifecycle)(nil)

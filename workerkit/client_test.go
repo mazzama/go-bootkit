@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+
 	"github.com/mazzama/go-bootkit/workerkit"
 )
 

@@ -17,6 +17,24 @@ type User struct {
 	Name string
 }
 
+// strictCodec simulates a codec that does not automatically allocate double pointers
+// (unlike encoding/json) to prove that the generic helper does not protect against
+// pointer types.
+type strictCodec struct{}
+
+func (strictCodec) Marshal(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+func (strictCodec) Unmarshal(data []byte, v any) error {
+	// v is always a pointer because we pass &zero.
+	// If the inner type (zero) is ALSO a pointer, we reject it.
+	if reflect.TypeOf(v).Elem().Kind() == reflect.Pointer {
+		return errors.New("strictCodec: pointer to pointer not allowed")
+	}
+	return json.Unmarshal(data, v)
+}
+
 func TestGenerics_ValueType(t *testing.T) {
 	c := memcache.New()
 	ctx := context.Background()
@@ -35,24 +53,6 @@ func TestGenerics_ValueType(t *testing.T) {
 	if ret.Name != "Alice" {
 		t.Errorf("expected Alice, got %s", ret.Name)
 	}
-}
-
-// strictCodec simulates a codec that does not automatically allocate double pointers
-// (unlike encoding/json) to prove that the generic helper does not protect against
-// pointer types.
-type strictCodec struct{}
-
-func (strictCodec) Marshal(v any) ([]byte, error) {
-	return json.Marshal(v)
-}
-
-func (strictCodec) Unmarshal(data []byte, v any) error {
-	// v is always a pointer because we pass &zero.
-	// If the inner type (zero) is ALSO a pointer, we reject it.
-	if reflect.TypeOf(v).Elem().Kind() == reflect.Pointer {
-		return errors.New("strictCodec: pointer to pointer not allowed")
-	}
-	return json.Unmarshal(data, v)
 }
 
 func TestGenerics_PointerType_Fails(t *testing.T) {

@@ -10,10 +10,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mazzama/go-bootkit/core/healthkit"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
+// ApplicationRunner orchestrates the component lifecycle: it starts all
+// registered services (with an optional per-service readiness deadline),
+// wires health checks into the aggregator, and shuts services down in
+// reverse registration order on context cancellation or signal.
 type ApplicationRunner struct {
 	logger           *slog.Logger
 	services         []Component
@@ -24,8 +29,12 @@ type ApplicationRunner struct {
 	mu               sync.Mutex
 }
 
+// Option configures an ApplicationRunner at construction time.
 type Option func(*ApplicationRunner)
 
+// NewApplicationRunner creates an ApplicationRunner with default shutdown
+// timeout (15s) and health aggregator (1s cache floor). Pass Option values
+// to override defaults.
 func NewApplicationRunner(options ...Option) *ApplicationRunner {
 	runner := &ApplicationRunner{
 		shutdownTimeout:  15 * time.Second,           // Default shutdown timeout
@@ -40,12 +49,15 @@ func NewApplicationRunner(options ...Option) *ApplicationRunner {
 	return runner
 }
 
+// WithLogger sets the runner's logger, used for shutdown error reporting.
 func WithLogger(l *slog.Logger) Option {
 	return func(a *ApplicationRunner) {
 		a.logger = l
 	}
 }
 
+// WithShutdownTimeout sets the total budget for shutting down all services.
+// Non-positive values are ignored (the default 15s applies).
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(a *ApplicationRunner) {
 		if d > 0 {
@@ -54,6 +66,8 @@ func WithShutdownTimeout(d time.Duration) Option {
 	}
 }
 
+// WithStartDeadline sets how long each Readyable service may take to become
+// ready before startup is aborted. Non-positive values disable the deadline.
 func WithStartDeadline(d time.Duration) Option {
 	return func(a *ApplicationRunner) {
 		if d > 0 {
@@ -62,6 +76,7 @@ func WithStartDeadline(d time.Duration) Option {
 	}
 }
 
+// WithServices registers the components the runner starts and stops.
 func WithServices(services ...Component) Option {
 	return func(a *ApplicationRunner) {
 		a.mu.Lock()
@@ -70,6 +85,8 @@ func WithServices(services ...Component) Option {
 	}
 }
 
+// WithHooks installs an observability hook receiving lifecycle and health
+// evaluation events. Nil hooks are ignored.
 func WithHooks(h Hooks) Option {
 	return func(a *ApplicationRunner) {
 		if h != nil {
@@ -92,14 +109,18 @@ func WithHealthCacheTTL(d time.Duration) Option {
 	}
 }
 
-// Deprecated: WithHealthAggregator overrides the runner's internal health aggregator.
-// Prefer WithHealthCacheTTL to configure the default aggregator's cache duration.
+// WithHealthAggregator overrides the runner's internal health aggregator.
+//
+// Deprecated: prefer WithHealthCacheTTL to configure the default aggregator's
+// cache duration.
 func WithHealthAggregator(agg *healthkit.Aggregator) Option {
 	return func(a *ApplicationRunner) {
 		a.healthAggregator = agg
 	}
 }
 
+// Run starts all services, blocks until ctx is cancelled or a signal is
+// received, then shuts everything down and joins any start/shutdown errors.
 func (r *ApplicationRunner) Run(ctx context.Context) error {
 	r.healthWiring()
 
@@ -107,7 +128,7 @@ func (r *ApplicationRunner) Run(ctx context.Context) error {
 	defer stop()
 
 	startErr := r.startSupervisor(ctx)
-	shutdownErrs := r.shutdownOrchestrator()
+	shutdownErrs := r.shutdownOrchestrator(ctx)
 
 	var allErrs []error
 	if startErr != nil {
@@ -176,7 +197,7 @@ func (r *ApplicationRunner) startSupervisor(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (r *ApplicationRunner) shutdownOrchestrator() []error {
+func (r *ApplicationRunner) shutdownOrchestrator(ctx context.Context) []error {
 	var shutdownErrs []error
 	remainingTimeout := r.shutdownTimeout
 
@@ -186,7 +207,7 @@ func (r *ApplicationRunner) shutdownOrchestrator() []error {
 
 		budget := remainingTimeout / time.Duration(i+1)
 		start := time.Now()
-		shCtx, cancel := context.WithTimeout(context.Background(), budget)
+		shCtx, cancel := context.WithTimeout(ctx, budget)
 
 		stopErr := svc.Stop(shCtx)
 		stopDuration := time.Since(start)

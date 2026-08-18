@@ -18,9 +18,10 @@ type MemoryCache struct {
 	codec cachekit.Codec
 }
 
-var _ cachekit.Cache = (*MemoryCache)(nil)
-
+// Option configures a MemoryCache at construction time.
 type Option func(*MemoryCache)
+
+var _ cachekit.Cache = (*MemoryCache)(nil)
 
 // WithCodec sets a custom Codec for MemoryCache.
 func WithCodec(codec cachekit.Codec) Option {
@@ -49,6 +50,8 @@ func (c *MemoryCache) codecOrDefault() cachekit.Codec {
 	return cachekit.DefaultCodec
 }
 
+// Get retrieves the value at key and unmarshals it into dest. A cache miss
+// returns an error satisfying errors.Is(err, cachekit.ErrCacheMiss).
 func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -59,6 +62,8 @@ func (c *MemoryCache) Get(_ context.Context, key string, dest any) error {
 	return c.codecOrDefault().Unmarshal([]byte(v), dest)
 }
 
+// Set stores the value under key, serialized with the configured codec.
+// TTL is not supported — entries persist until deleted or Reset.
 func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -70,6 +75,7 @@ func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, _ ti
 	return nil
 }
 
+// Delete removes the key from the cache. Deleting a missing key is a no-op.
 func (c *MemoryCache) Delete(_ context.Context, key string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -77,6 +83,7 @@ func (c *MemoryCache) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+// Exists reports whether key is present in the cache.
 func (c *MemoryCache) Exists(_ context.Context, key string) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
