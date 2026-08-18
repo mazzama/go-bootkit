@@ -68,6 +68,12 @@ type EnqueueOptions struct {
 // EnqueueOption configures how a task is enqueued.
 type EnqueueOption func(*EnqueueOptions)
 
+// Enqueuer is the interface for enqueueing background tasks.
+type Enqueuer interface {
+	Enqueue(task Task, opts ...EnqueueOption) (*TaskInfo, error)
+	EnqueueContext(ctx context.Context, task Task, opts ...EnqueueOption) (*TaskInfo, error)
+}
+
 // WithQueue sets the target queue name.
 func WithQueue(name string) EnqueueOption {
 	return func(o *EnqueueOptions) { o.Queue = name }
@@ -119,10 +125,4 @@ func WithRetention(d time.Duration) EnqueueOption {
 // WithGroup groups tasks together for aggregation.
 func WithGroup(name string) EnqueueOption {
 	return func(o *EnqueueOptions) { o.Group = name }
-}
-
-// Enqueuer is the interface for enqueueing background tasks.
-type Enqueuer interface {
-	Enqueue(task Task, opts ...EnqueueOption) (*TaskInfo, error)
-	EnqueueContext(ctx context.Context, task Task, opts ...EnqueueOption) (*TaskInfo, error)
 }

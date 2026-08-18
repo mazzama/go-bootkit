@@ -4,9 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/mazzama/go-bootkit/core"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/mazzama/go-bootkit/core"
 )
 
 // OTelHooks implements core.Hooks by recording metrics via OpenTelemetry.
@@ -17,6 +18,8 @@ type OTelHooks struct {
 	healthDuration    metric.Int64Histogram
 	healthErrorsTotal metric.Int64Counter
 }
+
+var _ core.Hooks = (*OTelHooks)(nil)
 
 // NewHooks creates a new OTelHooks instance using the provided meter.
 func NewHooks(meter metric.Meter) (*OTelHooks, error) {
@@ -60,6 +63,7 @@ func NewHooks(meter metric.Meter) (*OTelHooks, error) {
 	}, nil
 }
 
+// OnComponentStart records the component start duration as a metric.
 func (h *OTelHooks) OnComponentStart(name string, duration time.Duration, err error) {
 	attrs := []attribute.KeyValue{
 		attribute.String("component", name),
@@ -68,6 +72,7 @@ func (h *OTelHooks) OnComponentStart(name string, duration time.Duration, err er
 	h.startDuration.Record(context.Background(), duration.Milliseconds(), metric.WithAttributes(attrs...))
 }
 
+// OnComponentStop records the component stop duration as a metric.
 func (h *OTelHooks) OnComponentStop(name string, duration time.Duration, err error) {
 	attrs := []attribute.KeyValue{
 		attribute.String("component", name),
@@ -76,6 +81,8 @@ func (h *OTelHooks) OnComponentStop(name string, duration time.Duration, err err
 	h.stopDuration.Record(context.Background(), duration.Milliseconds(), metric.WithAttributes(attrs...))
 }
 
+// OnHealthEvaluated records the health check evaluation duration and
+// increments the error counter on failure.
 func (h *OTelHooks) OnHealthEvaluated(kind string, duration time.Duration, err error) {
 	attrs := []attribute.KeyValue{
 		attribute.String("kind", kind),
@@ -87,5 +94,3 @@ func (h *OTelHooks) OnHealthEvaluated(kind string, duration time.Duration, err e
 		h.healthErrorsTotal.Add(context.Background(), 1, metric.WithAttributes(attrs...))
 	}
 }
-
-var _ core.Hooks = (*OTelHooks)(nil)

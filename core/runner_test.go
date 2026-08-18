@@ -26,6 +26,42 @@ type mockComponent struct {
 	stopped atomic.Bool
 }
 
+type mockHealthComponent struct {
+	mockComponent
+	checks []healthkit.Check
+}
+
+type recordingHooks struct {
+	mu           sync.Mutex
+	starts       []string
+	stops        []string
+	healthChecks []string
+}
+
+var _ Readyable = (*mockComponent)(nil)
+
+func (m *mockHealthComponent) HealthChecks() []healthkit.Check {
+	return m.checks
+}
+
+func (r *recordingHooks) OnComponentStart(name string, duration time.Duration, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.starts = append(r.starts, name)
+}
+
+func (r *recordingHooks) OnComponentStop(name string, duration time.Duration, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stops = append(r.stops, name)
+}
+
+func (r *recordingHooks) OnHealthEvaluated(kind string, duration time.Duration, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.healthChecks = append(r.healthChecks, kind)
+}
+
 func (m *mockComponent) Name() string { return m.name }
 
 func (m *mockComponent) Start(ctx context.Context) error {
@@ -48,8 +84,6 @@ func (m *mockComponent) Stop(ctx context.Context) error {
 func (m *mockComponent) Ready() <-chan struct{} {
 	return m.readyCh
 }
-
-var _ Readyable = (*mockComponent)(nil)
 
 func TestNewApplicationRunnerDefaults(t *testing.T) {
 	r := NewApplicationRunner()
@@ -214,15 +248,6 @@ func TestRunLogsShutdownErrors(t *testing.T) {
 	}
 }
 
-type mockHealthComponent struct {
-	mockComponent
-	checks []healthkit.Check
-}
-
-func (m *mockHealthComponent) HealthChecks() []healthkit.Check {
-	return m.checks
-}
-
 func TestRunPropagatesHealthChecks(t *testing.T) {
 	svc := &mockHealthComponent{
 		mockComponent: mockComponent{
@@ -253,7 +278,7 @@ func TestRunPropagatesHealthChecks(t *testing.T) {
 
 	agg := r.HealthAggregator()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	agg.Handler(healthkit.Liveness).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -362,29 +387,6 @@ func TestRunReturnsShutdownErrors(t *testing.T) {
 	}
 }
 
-type recordingHooks struct {
-	mu           sync.Mutex
-	starts       []string
-	stops        []string
-	healthChecks []string
-}
-
-func (r *recordingHooks) OnComponentStart(name string, duration time.Duration, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.starts = append(r.starts, name)
-}
-func (r *recordingHooks) OnComponentStop(name string, duration time.Duration, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.stops = append(r.stops, name)
-}
-func (r *recordingHooks) OnHealthEvaluated(kind string, duration time.Duration, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.healthChecks = append(r.healthChecks, kind)
-}
-
 func TestRunHooksAreCalled(t *testing.T) {
 	hooks := &recordingHooks{}
 	readyCh := make(chan struct{})
@@ -415,7 +417,7 @@ func TestRunHooksAreCalled(t *testing.T) {
 
 	// Trigger health check to ensure hook fires
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 	r.HealthAggregator().Handler(healthkit.Liveness).ServeHTTP(rec, req)
 
 	hooks.mu.Lock()

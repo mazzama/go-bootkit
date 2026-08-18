@@ -19,24 +19,11 @@ type pgxRowAdapter struct {
 	row pgx.Row
 }
 
-func (r pgxRowAdapter) Scan(dest ...any) error {
-	err := r.row.Scan(dest...)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNoRows
-	}
-	return err
-}
-
 // pgxRowsAdapter adapts pgx.Rows to the framework Rows. It is a shallow
 // pass-through; its value is keeping pgx.Rows out of repository imports.
 type pgxRowsAdapter struct {
 	rows pgx.Rows
 }
-
-func (r pgxRowsAdapter) Next() bool             { return r.rows.Next() }
-func (r pgxRowsAdapter) Scan(dest ...any) error { return r.rows.Scan(dest...) }
-func (r pgxRowsAdapter) Err() error             { return r.rows.Err() }
-func (r pgxRowsAdapter) Close()                 { r.rows.Close() }
 
 // pgxProvider is the query surface shared by pgx.Tx and *pgxpool.Pool: the pgx
 // query methods plus opening a transaction. Both framework adapters translate
@@ -53,6 +40,38 @@ type pgxProvider interface {
 type pgxProviderAdapter struct {
 	src pgxProvider
 }
+
+// pgxTxAdapter adapts a pgx.Tx to the framework Tx. It embeds pgxProviderAdapter
+// for the query surface and adds Commit/Rollback.
+type pgxTxAdapter struct {
+	pgxProviderAdapter
+	tx pgx.Tx
+}
+
+// poolAdapter adapts a *pgxpool.Pool to TxProvider. It is the wiring-side entry
+// point for callers who own a pool directly (tests, non-Lifecycle deployments).
+// Repositories never see it.
+type poolAdapter struct {
+	pgxProviderAdapter
+}
+
+var (
+	_ TxProvider = poolAdapter{}
+	_ Tx         = pgxTxAdapter{}
+)
+
+func (r pgxRowAdapter) Scan(dest ...any) error {
+	err := r.row.Scan(dest...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNoRows
+	}
+	return err
+}
+
+func (r pgxRowsAdapter) Next() bool             { return r.rows.Next() }
+func (r pgxRowsAdapter) Scan(dest ...any) error { return r.rows.Scan(dest...) }
+func (r pgxRowsAdapter) Err() error             { return r.rows.Err() }
+func (r pgxRowsAdapter) Close()                 { r.rows.Close() }
 
 func (a pgxProviderAdapter) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
 	tag, err := a.src.Exec(ctx, sql, args...)
@@ -81,13 +100,6 @@ func (a pgxProviderAdapter) Begin(ctx context.Context) (Tx, error) {
 	return newPgxTxAdapter(tx), nil
 }
 
-// pgxTxAdapter adapts a pgx.Tx to the framework Tx. It embeds pgxProviderAdapter
-// for the query surface and adds Commit/Rollback.
-type pgxTxAdapter struct {
-	pgxProviderAdapter
-	tx pgx.Tx
-}
-
 func newPgxTxAdapter(tx pgx.Tx) pgxTxAdapter {
 	return pgxTxAdapter{
 		pgxProviderAdapter: pgxProviderAdapter{src: tx},
@@ -107,18 +119,8 @@ func (t pgxTxAdapter) Rollback(ctx context.Context) error {
 	return err
 }
 
-// poolAdapter adapts a *pgxpool.Pool to TxProvider. It is the wiring-side entry
-// point for callers who own a pool directly (tests, non-Lifecycle deployments).
-// Repositories never see it.
-type poolAdapter struct {
-	pgxProviderAdapter
-}
-
 // NewPoolProvider wraps a *pgxpool.Pool as a TxProvider. Use it at wiring time
 // when you own a pool directly rather than going through PostgresDB.
 func NewPoolProvider(pool *pgxpool.Pool) TxProvider {
 	return poolAdapter{pgxProviderAdapter: pgxProviderAdapter{src: pool}}
 }
-
-var _ TxProvider = poolAdapter{}
-var _ Tx = pgxTxAdapter{}

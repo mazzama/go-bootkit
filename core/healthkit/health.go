@@ -12,13 +12,43 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// Kind identifies the type of a health check.
 type Kind int
 
+// Check is a single health check to be evaluated by an Aggregator.
+type Check struct {
+	Fn      func(ctx context.Context) error
+	Name    string
+	Kind    Kind
+	Timeout time.Duration
+}
+
+type cachedResult struct {
+	err error
+	at  time.Time
+}
+
+// Aggregator runs and caches health checks, keyed by Kind.
+type Aggregator struct {
+	cache    [3]atomic.Value
+	checks   map[Kind][]Check
+	cacheTTL time.Duration
+	hook     func(kind Kind, duration time.Duration, err error)
+	mu       sync.RWMutex
+	flight   singleflight.Group
+}
+
+// The kinds of health checks the aggregator can evaluate.
 const (
 	Liveness Kind = iota
 	Readiness
 	Startup
 )
+
+// defaultCacheTTLFloor is applied when NewAggregator is called with 0, so that
+// concurrent liveness/readiness/startup probes against the same backend collapse
+// onto a single cached result rather than each running a live check.
+const defaultCacheTTLFloor = 1 * time.Second
 
 // String returns the stable string label for the health check kind.
 // Unrecognized values map to "unknown".
@@ -33,27 +63,6 @@ func (k Kind) String() string {
 	default:
 		return "unknown"
 	}
-}
-
-type Check struct {
-	Fn      func(ctx context.Context) error
-	Name    string
-	Kind    Kind
-	Timeout time.Duration
-}
-
-type cachedResult struct {
-	err error
-	at  time.Time
-}
-
-type Aggregator struct {
-	cache    [3]atomic.Value
-	checks   map[Kind][]Check
-	cacheTTL time.Duration
-	hook     func(kind Kind, duration time.Duration, err error)
-	mu       sync.RWMutex
-	flight   singleflight.Group
 }
 
 // StandardChecks returns the standard liveness/readiness pair shared by
@@ -78,11 +87,6 @@ func StandardChecks(name string, readyFn func(ctx context.Context) error) []Chec
 	}
 }
 
-// defaultCacheTTLFloor is applied when NewAggregator is called with 0, so that
-// concurrent liveness/readiness/startup probes against the same backend collapse
-// onto a single cached result rather than each running a live check.
-const defaultCacheTTLFloor = 1 * time.Second
-
 // NewAggregator creates a health check aggregator with the given cache TTL.
 //
 // A cacheTTL of 0 applies a safe 1s floor (defaultCacheTTLFloor) to keep probes
@@ -103,6 +107,7 @@ func NewAggregator(cacheTTL time.Duration) *Aggregator {
 	}
 }
 
+// Register adds checks to the aggregator.
 func (a *Aggregator) Register(checks ...Check) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -123,6 +128,8 @@ func (a *Aggregator) SetHook(hook func(kind Kind, duration time.Duration, err er
 	a.hook = hook
 }
 
+// Handler returns an HTTP handler that evaluates the given kind of health
+// check and responds 200 OK on success or 503 on failure.
 func (a *Aggregator) Handler(kind Kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := a.evaluate(r.Context(), kind); err != nil {

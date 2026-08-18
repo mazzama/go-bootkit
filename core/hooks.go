@@ -16,8 +16,13 @@ type Hooks interface {
 // NoOpHooks is a zero-allocation default implementation of Hooks.
 type NoOpHooks struct{}
 
-func (NoOpHooks) OnComponentStart(name string, duration time.Duration, err error)  {}
-func (NoOpHooks) OnComponentStop(name string, duration time.Duration, err error)   {}
-func (NoOpHooks) OnHealthEvaluated(kind string, duration time.Duration, err error) {}
-
 var _ Hooks = NoOpHooks{}
+
+// OnComponentStart is a no-op implementation of Hooks.OnComponentStart.
+func (NoOpHooks) OnComponentStart(name string, duration time.Duration, err error) {}
+
+// OnComponentStop is a no-op implementation of Hooks.OnComponentStop.
+func (NoOpHooks) OnComponentStop(name string, duration time.Duration, err error) {}
+
+// OnHealthEvaluated is a no-op implementation of Hooks.OnHealthEvaluated.
+func (NoOpHooks) OnHealthEvaluated(kind string, duration time.Duration, err error) {}

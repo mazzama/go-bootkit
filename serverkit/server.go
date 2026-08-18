@@ -2,6 +2,7 @@ package serverkit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,20 +14,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httplog/v3"
+
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
-// Default HTTP server timeouts. These guard against slow clients and leaked
-// keepalive connections exhausting the server under load.
-const (
-	defaultReadHeaderTimeout = 5 * time.Second
-	defaultReadTimeout       = 15 * time.Second
-	defaultWriteTimeout      = 15 * time.Second
-	defaultIdleTimeout       = 60 * time.Second
-	defaultMaxHeaderBytes    = 1 << 20 // 1MB
-)
-
+// HTTPServer wraps an http.Server as a core.Component: it binds the listener
+// during Start, reports readiness, and gracefully shuts down on Stop.
 type HTTPServer struct {
 	core.Lifecycle
 
@@ -43,8 +37,38 @@ type HTTPServer struct {
 	maxHeaderBytes    int
 }
 
+// HTTPServerOption configures an HTTPServer at construction time.
 type HTTPServerOption func(*HTTPServer)
 
+// RouterOptions holds the tunable knobs for NewDefaultRouter.
+type RouterOptions struct {
+	Timeout time.Duration
+	// TrustedProxies are CIDR prefixes of reverse proxies in front of this
+	// server. When set, the router resolves the client IP from
+	// X-Forwarded-For (right-to-left, skipping trusted hops). When empty,
+	// the router falls back to the TCP peer address — safe by default:
+	// client-supplied forwarding headers are never trusted.
+	TrustedProxies []string
+	Middlewares    []func(http.Handler) http.Handler
+}
+
+// RouterOption configures RouterOptions at router construction time.
+type RouterOption func(*RouterOptions)
+
+// Default HTTP server timeouts. These guard against slow clients and leaked
+// keepalive connections exhausting the server under load.
+const (
+	defaultReadHeaderTimeout = 5 * time.Second
+	defaultReadTimeout       = 15 * time.Second
+	defaultWriteTimeout      = 15 * time.Second
+	defaultIdleTimeout       = 60 * time.Second
+	defaultMaxHeaderBytes    = 1 << 20 // 1MB
+)
+
+var _ core.Component = (*HTTPServer)(nil)
+
+// NewHTTPServer creates an HTTPServer with sensible default timeouts. The
+// handler is served on addr once Start is called.
 func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServerOption) (*HTTPServer, error) {
 	if addr == "" {
 		return nil, errors.New("http server address cannot be empty")
@@ -84,16 +108,17 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 
 		logger.Info("Starting HTTP server", "name", srv.name, "addr", srv.addr)
 
-		listener, err := net.Listen("tcp", srv.addr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create listener: %w", err)
+		var lc net.ListenConfig
+		listener, listenErr := lc.Listen(ctx, "tcp", srv.addr)
+		if listenErr != nil {
+			return nil, fmt.Errorf("failed to create listener: %w", listenErr)
 		}
 		srv.listener = listener
 		srv.server.Addr = listener.Addr().String()
 
 		go func() {
-			if err := srv.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("HTTP server error", "name", srv.name, "error", err)
+			if serveErr := srv.server.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				logger.Error("HTTP server error", "name", srv.name, "error", serveErr)
 			}
 		}()
 
@@ -102,9 +127,9 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 		return func(stopCtx context.Context) error {
 			logger.Info("Stopping HTTP server", "name", srv.name)
 
-			if err := srv.server.Shutdown(stopCtx); err != nil {
-				logger.Error("Error shutting down HTTP server", "name", srv.name, "error", err)
-				return err
+			if shutdownErr := srv.server.Shutdown(stopCtx); shutdownErr != nil {
+				logger.Error("Error shutting down HTTP server", "name", srv.name, "error", shutdownErr)
+				return shutdownErr
 			}
 
 			logger.Info("HTTP server stopped", "name", srv.name)
@@ -114,19 +139,6 @@ func NewHTTPServer(name, addr string, handler http.Handler, options ...HTTPServe
 
 	return srv, nil
 }
-
-type RouterOptions struct {
-	Timeout time.Duration
-	// TrustedProxies are CIDR prefixes of reverse proxies in front of this
-	// server. When set, the router resolves the client IP from
-	// X-Forwarded-For (right-to-left, skipping trusted hops). When empty,
-	// the router falls back to the TCP peer address — safe by default:
-	// client-supplied forwarding headers are never trusted.
-	TrustedProxies []string
-	Middlewares    []func(http.Handler) http.Handler
-}
-
-type RouterOption func(*RouterOptions)
 
 // WithRouterTimeout sets the request timeout middleware duration.
 func WithRouterTimeout(d time.Duration) RouterOption {
@@ -177,6 +189,9 @@ func MountHealthRoutes(mux chi.Router, health *healthkit.Aggregator) {
 	mux.Get("/health", health.Handler(healthkit.Liveness))
 }
 
+// NewDefaultRouter builds a chi router with request logging, request ID,
+// safe client-IP resolution, timeout middleware, and the standard health
+// routes. Extra middleware can be injected via WithMiddleware.
 func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ...RouterOption) chi.Router {
 	options := RouterOptions{Timeout: 60 * time.Second}
 	for _, opt := range opts {
@@ -237,10 +252,17 @@ func NewDefaultRouter(health *healthkit.Aggregator, logger *slog.Logger, opts ..
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	payload := fmt.Sprintf(`{"error":{"code":"%s","message":"%s"}}`, code, message)
-	_, _ = w.Write([]byte(payload))
+	payload, err := json.Marshal(map[string]any{
+		"error": map[string]any{"code": code, "message": message},
+	})
+	if err != nil {
+		_, _ = w.Write([]byte(`{"error":{"code":"INTERNAL","message":"failed to encode error response"}}`))
+		return
+	}
+	_, _ = w.Write(payload)
 }
 
+// WithLogger replaces the server's logger. Defaults to slog.Default().
 func WithLogger(logger *slog.Logger) HTTPServerOption {
 	return func(s *HTTPServer) {
 		s.logger = logger
@@ -293,10 +315,13 @@ func WithMaxHeaderBytes(n int) HTTPServerOption {
 	}
 }
 
+// Name returns the component name.
 func (s *HTTPServer) Name() string {
 	return s.name
 }
 
+// HealthChecks returns the standard liveness/readiness pair; readiness waits
+// on the listener being bound.
 func (s *HTTPServer) HealthChecks() []healthkit.Check {
 	return healthkit.StandardChecks(s.name, func(ctx context.Context) error {
 		select {
@@ -307,5 +332,3 @@ func (s *HTTPServer) HealthChecks() []healthkit.Check {
 		}
 	})
 }
-
-var _ core.Component = (*HTTPServer)(nil)

@@ -3,7 +3,8 @@ package serverkit
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
@@ -157,7 +159,11 @@ func TestStartAndStop(t *testing.T) {
 	}
 
 	// Test requesting the handler
-	resp, err := http.Get("http://" + srv.server.Addr)
+	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+srv.server.Addr, http.NoBody)
+	if reqErr != nil {
+		t.Fatalf("failed to build HTTP request: %v", reqErr)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("failed to make HTTP request to server: %v", err)
 	}
@@ -175,9 +181,9 @@ func TestStartAndStop(t *testing.T) {
 
 	// Start should exit with context.Canceled error
 	select {
-	case err := <-errCh:
-		if err != context.Canceled {
-			t.Errorf("expected context.Canceled from Start, got %v", err)
+	case startErr := <-errCh:
+		if !errors.Is(startErr, context.Canceled) {
+			t.Errorf("expected context.Canceled from Start, got %v", startErr)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Error("Start did not exit after context cancellation")
@@ -186,8 +192,8 @@ func TestStartAndStop(t *testing.T) {
 	// Stop the server
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer stopCancel()
-	if err := srv.Stop(stopCtx); err != nil {
-		t.Errorf("expected Stop to succeed, got %v", err)
+	if stopErr := srv.Stop(stopCtx); stopErr != nil {
+		t.Errorf("expected Stop to succeed, got %v", stopErr)
 	}
 }
 
@@ -202,7 +208,7 @@ func TestNewDefaultRouter(t *testing.T) {
 	}
 
 	// Verify health routes are registered by calling the handler directly
-	req := httptest.NewRequest(http.MethodGet, "/health/liveness", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/liveness", http.NoBody)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -220,7 +226,7 @@ func TestNewDefaultRouter(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req = httptest.NewRequest(http.MethodGet, "/test-route", nil)
+	req = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test-route", http.NoBody)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -232,7 +238,7 @@ func TestNewDefaultRouter(t *testing.T) {
 func TestDefaultRouter_NotFound(t *testing.T) {
 	handler := NewDefaultRouter(nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/does-not-exist", http.NoBody)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -246,7 +252,7 @@ func TestDefaultRouter_MethodNotAllowed(t *testing.T) {
 	handler.Get("/test", func(w http.ResponseWriter, r *http.Request) {})
 
 	// Request it with POST
-	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/test", http.NoBody)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -261,8 +267,13 @@ func assertJSONError(t *testing.T, rec *httptest.ResponseRecorder, expectedStatu
 	if got := rec.Header().Get("Content-Type"); got != "application/json" {
 		t.Errorf("expected Content-Type application/json, got %q", got)
 	}
-	expectedBody := fmt.Sprintf(`{"error":{"code":"%s","message":"%s"}}`, code, msg)
-	if strings.TrimSpace(rec.Body.String()) != expectedBody {
+	expectedBody, err := json.Marshal(map[string]any{
+		"error": map[string]any{"code": code, "message": msg},
+	})
+	if err != nil {
+		t.Fatalf("failed to encode expected body: %v", err)
+	}
+	if strings.TrimSpace(rec.Body.String()) != string(expectedBody) {
 		t.Errorf("expected body %q, got %q", expectedBody, rec.Body.String())
 	}
 }
@@ -275,7 +286,7 @@ func TestMountHealthRoutes(t *testing.T) {
 	// Verify all health endpoints are mounted
 	endpoints := []string{"/health/liveness", "/health/readiness", "/health/startup", "/health"}
 	for _, ep := range endpoints {
-		req := httptest.NewRequest(http.MethodGet, ep, nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, ep, http.NoBody)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -288,7 +299,7 @@ func TestMountHealthRoutes_NilAggregator(t *testing.T) {
 	router := chi.NewRouter()
 	MountHealthRoutes(router, nil) // should not panic
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", http.NoBody)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -349,7 +360,7 @@ func TestNewDefaultRouterWithMiddleware(t *testing.T) {
 
 	handler := NewDefaultRouter(agg, logger, WithMiddleware(recordingMiddleware))
 
-	req := httptest.NewRequest(http.MethodGet, "/health/liveness", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/liveness", http.NoBody)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -361,6 +372,7 @@ func TestNewDefaultRouterWithMiddleware(t *testing.T) {
 		t.Errorf("expected custom middleware to be applied, got header: %s", rec.Header().Get("X-Custom-Middleware"))
 	}
 }
+
 func TestWithRouterTimeout(t *testing.T) {
 	opts := &RouterOptions{}
 	WithRouterTimeout(5 * time.Second)(opts)
@@ -389,7 +401,7 @@ func TestDefaultRouter_RejectsSpoofedForwardedHeaders(t *testing.T) {
 		gotIP = middleware.GetClientIP(r.Context())
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/whoami", http.NoBody)
 	req.RemoteAddr = "192.0.2.10:54321" // true TCP peer
 	req.Header.Set("X-Forwarded-For", "203.0.113.66, 198.51.100.7")
 	req.Header.Set("X-Real-IP", "203.0.113.66")
@@ -419,7 +431,7 @@ func TestDefaultRouter_WithTrustedProxies(t *testing.T) {
 		gotIP = middleware.GetClientIP(r.Context())
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/whoami", http.NoBody)
 	req.RemoteAddr = "10.1.2.3:443" // trusted proxy (Caddy)
 	req.Header.Set("X-Forwarded-For", "203.0.113.66, 10.1.2.3")
 

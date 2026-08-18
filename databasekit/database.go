@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/mazzama/go-bootkit/core"
 	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/mazzama/go-bootkit/core/retry"
 )
 
+// PostgresDB is a lifecycle-managed PostgreSQL connection pool component.
 type PostgresDB struct {
 	core.Lifecycle
 
@@ -26,8 +28,17 @@ type PostgresDB struct {
 	retryBackoff  time.Duration
 }
 
+// PostgresOption configures a PostgresDB.
 type PostgresOption func(*PostgresDB)
 
+// txProviderAdapter wraps a PostgresDB to present only the TxProvider interface.
+type txProviderAdapter struct {
+	db *PostgresDB
+}
+
+var _ core.Component = (*PostgresDB)(nil)
+
+// NewPostgresDB creates a PostgresDB from a connection string and options.
 func NewPostgresDB(connStr string, options ...PostgresOption) (*PostgresDB, error) {
 	if connStr == "" {
 		return nil, errors.New("connection string cannot be empty")
@@ -110,6 +121,7 @@ func (db *PostgresDB) buildPoolConfig() (*pgxpool.Config, error) {
 	return config, nil
 }
 
+// WithDBName sets the component name reported by PostgresDB.Name.
 func WithDBName(name string) PostgresOption {
 	return func(db *PostgresDB) {
 		db.name = name
@@ -135,12 +147,15 @@ func WithMinConns(n int32) PostgresOption {
 	}
 }
 
+// WithLogger sets the logger used by the database component.
 func WithLogger(logger *slog.Logger) PostgresOption {
 	return func(db *PostgresDB) {
 		db.logger = logger
 	}
 }
 
+// WithConnectRetry sets the retry policy for establishing the initial
+// connection: up to maxAttempts tries with the given backoff between them.
 func WithConnectRetry(maxAttempts int, backoff time.Duration) PostgresOption {
 	return func(db *PostgresDB) {
 		if maxAttempts > 0 && backoff > 0 {
@@ -150,10 +165,12 @@ func WithConnectRetry(maxAttempts int, backoff time.Duration) PostgresOption {
 	}
 }
 
+// Name returns the component name of the database.
 func (db *PostgresDB) Name() string {
 	return db.name
 }
 
+// HealthChecks returns the liveness/readiness checks for the database pool.
 func (db *PostgresDB) HealthChecks() []healthkit.Check {
 	return healthkit.StandardChecks(db.name, func(ctx context.Context) error {
 		pool := db.pool
@@ -163,8 +180,6 @@ func (db *PostgresDB) HealthChecks() []healthkit.Check {
 		return pool.Ping(ctx)
 	})
 }
-
-var _ core.Component = (*PostgresDB)(nil)
 
 func (db *PostgresDB) exec(ctx context.Context, sql string, args ...any) (int64, error) {
 	if db.pool == nil {
@@ -201,11 +216,6 @@ func (db *PostgresDB) begin(ctx context.Context) (Tx, error) {
 		return nil, err
 	}
 	return newPgxTxAdapter(tx), nil
-}
-
-// txProviderAdapter wraps a PostgresDB to present only the TxProvider interface.
-type txProviderAdapter struct {
-	db *PostgresDB
 }
 
 func (a txProviderAdapter) Exec(ctx context.Context, sql string, args ...any) (int64, error) {

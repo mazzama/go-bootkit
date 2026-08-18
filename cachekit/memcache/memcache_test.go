@@ -10,6 +10,17 @@ import (
 	"github.com/mazzama/go-bootkit/cachekit/memcache"
 )
 
+type customCodec struct{}
+
+func (customCodec) Marshal(v any) ([]byte, error) {
+	return []byte("prefix:" + v.(string)), nil
+}
+
+func (customCodec) Unmarshal(data []byte, dest any) error {
+	*(dest.(*string)) = string(data[7:])
+	return nil
+}
+
 func TestMemoryCache(t *testing.T) {
 	cache := memcache.New()
 	ctx := context.Background()
@@ -47,13 +58,6 @@ func TestMemoryCache(t *testing.T) {
 		t.Fatalf("expected foo to exist")
 	}
 
-	// Test Get with unmarshalable dest
-	var badDest chan int
-	err = cache.Get(ctx, "foo", &badDest)
-	if err == nil {
-		t.Fatalf("expected error when unmarshaling into bad dest")
-	}
-
 	// Test Set and Get struct
 	type Data struct {
 		Name string
@@ -89,8 +93,25 @@ func TestMemoryCache(t *testing.T) {
 	if exists {
 		t.Fatalf("expected cache to be empty after reset")
 	}
+}
+
+func TestMemoryCacheErrors(t *testing.T) {
+	cache := memcache.New()
+	ctx := context.Background()
+
+	if err := cache.Set(ctx, "foo", "bar", time.Minute); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Test Get with unmarshalable dest
+	var badDest chan int
+	err := cache.Get(ctx, "foo", &badDest)
+	if err == nil {
+		t.Fatalf("expected error when unmarshaling into bad dest")
+	}
 
 	// Test Get on miss
+	var dest string
 	err = cache.Get(ctx, "missing", &dest)
 	if err == nil {
 		t.Fatalf("expected error on cache miss")
@@ -104,17 +125,6 @@ func TestMemoryCache(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when setting unmarshalable value")
 	}
-}
-
-type customCodec struct{}
-
-func (customCodec) Marshal(v any) ([]byte, error) {
-	return []byte("prefix:" + v.(string)), nil
-}
-
-func (customCodec) Unmarshal(data []byte, dest any) error {
-	*(dest.(*string)) = string(data[7:])
-	return nil
 }
 
 func TestMemoryCacheWithCustomCodec(t *testing.T) {

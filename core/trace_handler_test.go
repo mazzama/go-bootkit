@@ -8,8 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mazzama/go-bootkit/core"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/mazzama/go-bootkit/core"
 )
 
 type syncBuffer struct {
@@ -129,10 +130,8 @@ func TestTraceHandler_ConcurrentSafety(t *testing.T) {
 	logger := slog.New(core.NewTraceHandler(handler))
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			traceID, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
 			spanID, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
 
@@ -144,7 +143,7 @@ func TestTraceHandler_ConcurrentSafety(t *testing.T) {
 
 			ctx := trace.ContextWithSpanContext(context.Background(), spanCtx)
 			logger.InfoContext(ctx, "concurrent message")
-		}(i)
+		})
 	}
 	wg.Wait()
 	// Test passes if -race does not detect any data races

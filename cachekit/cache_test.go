@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/mazzama/go-bootkit/core/healthkit"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/mazzama/go-bootkit/core/healthkit"
 )
 
 func TestWithName(t *testing.T) {
@@ -66,6 +67,7 @@ func TestWithUsername(t *testing.T) {
 		t.Errorf("expected 'admin', got %q", cache.options.Username)
 	}
 }
+
 func TestWithCodec(t *testing.T) {
 	cache := &RedisCache{}
 	codec := JSONCodec{}
@@ -74,6 +76,7 @@ func TestWithCodec(t *testing.T) {
 		t.Error("expected codec to be set")
 	}
 }
+
 func TestJSONCodec(t *testing.T) {
 	codec := JSONCodec{}
 	type item struct {
@@ -84,13 +87,13 @@ func TestJSONCodec(t *testing.T) {
 		t.Fatalf("unexpected marshal error: %v", err)
 	}
 	var res item
-	if err := codec.Unmarshal(b, &res); err != nil {
-		t.Fatalf("unexpected unmarshal error: %v", err)
+	if unmarshalErr := codec.Unmarshal(b, &res); unmarshalErr != nil {
+		t.Fatalf("unexpected unmarshal error: %v", unmarshalErr)
 	}
 	if res.Name != "bootkit" {
 		t.Fatalf("expected bootkit, got %s", res.Name)
 	}
-	if err := codec.Unmarshal([]byte("invalid json"), &res); err == nil {
+	if unmarshalErr := codec.Unmarshal([]byte("invalid json"), &res); unmarshalErr == nil {
 		t.Fatal("expected unmarshal error for invalid json")
 	}
 }
@@ -130,6 +133,7 @@ func TestRedisCacheConnectRetryFailure(t *testing.T) {
 		t.Errorf("unexpected error msg: %v", err)
 	}
 }
+
 func TestRedisCacheConnectRetrySmallBackoff(t *testing.T) {
 	cache, err := NewRedisCache("127.0.0.1:1", WithConnectRetry(2, 1*time.Nanosecond))
 	if err != nil {
@@ -169,6 +173,7 @@ func TestRedisCacheConnectNoRetryFailure(t *testing.T) {
 		t.Errorf("unexpected error msg: %v", err)
 	}
 }
+
 func TestRedisCacheSetMarshalError(t *testing.T) {
 	cache := &RedisCache{}
 	err := cache.Set(t.Context(), "key", make(chan int), 0)

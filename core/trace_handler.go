@@ -32,6 +32,8 @@ func (h *TraceHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle injects trace_id and span_id attributes at the root of the log record
 // before applying any groups or attributes added via WithGroup/WithAttrs.
+//
+//nolint:gocritic // slog.Handler interface mandates Record by value.
 func (h *TraceHandler) Handle(ctx context.Context, r slog.Record) error {
 	handler := h.base
 
